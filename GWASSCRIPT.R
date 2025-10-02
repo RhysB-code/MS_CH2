@@ -1,340 +1,112 @@
 # =============================================================
-# GWASpoly pipeline for tetraploid blackberry budbreak (binary)
-#  - Ignores Dec 20 & Jan 1
-#  - Binary traits at Jan 3 and Jan 15
-#  - LOCO kinship; additive + 1-dom models
-#  - Optional PF covariate re-run
+# Blackberry budbreak GWAS (tetraploid) — robust end-to-end
+#  - Traits: Binary (>0), Percent, BLUPs, BLUEs, PCA (PC1/PC2)
+#  - Dates used: Jan 3, Jan 15 (ignores Dec 20 & Jan 1)
+#  - Cohorts: ALL / PF-only (APF*) / FF-only (A-*)
+#  - PF covariate: with and without (auto-skip if constant)
+#  - Models: additive, 1-dom, general  (LOCO kinship)
+#  - END: All Manhattan plots printed to Plots pane, labeled
 # =============================================================
 
-rm(list = ls())
-options(stringsAsFactors = FALSE)
+rm(list = ls()); options(stringsAsFactors = FALSE)
 
 # ---- Packages ----
-pkgs <- c("tidyverse","data.table","GWASpoly","ggplot2")
+pkgs <- c("tidyverse","data.table","GWASpoly","stringr",
+          "lme4","lmerTest","emmeans","parallel","cowplot")
 to_install <- pkgs[!pkgs %in% installed.packages()[,"Package"]]
 if (length(to_install)) install.packages(to_install, dependencies = TRUE)
 invisible(lapply(pkgs, library, character.only = TRUE))
 
-# ---- User paths (EDIT if needed) ----
-pheno_file <- "GWAS_Data_Budbreak.csv"  # your uploaded phenos
-geno_file  <- "captureseq2025_GATK_postmean_70K_updog_filtered.csv" # rec: 70K Updog-filtered
-pf_file    <- "PF_covariate.csv"        # optional; NAME,PF (0/1). If missing, we skip PF run.
-
-out_dir <- "gwaspoly_budbreak_out"
-dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-
-# =============================================================
-# 1) Build binary phenotypes (0/1) for Jan 3 and Jan 15
-# =============================================================
-ph <- fread(pheno_file)
-
-# Try to derive an individual NAME that matches your genotype IDs.
-# Many of your rows look like "APF-665T_3_19_B_1" in column "Lug Order".
-# We'll use the token BEFORE the first underscore as the genotype name.
-name_col <- if ("Lug Order" %in% names(ph)) "Lug Order" else names(ph)[1]
-ph <- ph %>%
-  mutate(NAME  = sub("(_.*)$","", .data[[name_col]]),
-         TBUDS = coalesce(`Total Buds`, `Total Buds.1`))  # fall back if duplicated column
-
-# Keep only evaluation columns we need
-# NOTE: We deliberately ignore "20-Dec" and "1-Jan" as requested.
-need_cols <- c("NAME","TBUDS","3-Jan","15-Jan")
-missing_needed <- setdiff(need_cols, names(ph))
-if (length(missing_needed)) {
-  stop("Missing expected columns in phenotype file: ", paste(missing_needed, collapse=", "))
-}
-
-# Coerce bud counts to numeric and cap to TBUDS
-ph <- ph %>%
-  mutate(`3-Jan`  = suppressWarnings(as.numeric(`3-Jan`)),
-         `15-Jan` = suppressWarnings(as.numeric(`15-Jan`))) %>%
-  mutate(`3-Jan`  = pmax(0, pmin(`3-Jan`,  TBUDS)),
-         `15-Jan` = pmax(0, pmin(`15-Jan`, TBUDS)))
-
-# Make binary per cutting (1 if any bud broke)
-ph <- ph %>%
-  mutate(BB_3Jan_bin  = if_else(`3-Jan`  > 0, 1, 0),
-         BB_15Jan_bin = if_else(`15-Jan` > 0, 1, 0))
-
-# Aggregate to genotype level: if ANY cutting for a genotype broke bud → 1
-ph_g <- ph %>%
-  group_by(NAME) %>%
-  summarize(
-    BB_3Jan  = as.integer(any(BB_3Jan_bin  == 1, na.rm = TRUE)),
-    BB_15Jan = as.integer(any(BB_15Jan_bin == 1, na.rm = TRUE)),
-    n_obs    = n()
-  ) %>% ungroup()
-
-# Write GWASpoly-style phenotype file (NAME first, then traits; covariates can follow)
-pheno_out_noPF <- file.path(out_dir, "phenotypes_binary_noPF.csv")
-fwrite(ph_g[,c("NAME","BB_3Jan","BB_15Jan")], pheno_out_noPF)
-
-# =============================================================
-# 2) Prepare genotype (dosage) for GWASpoly
-#    Expect columns: Marker, Chrom, Position, [REF, ALT optional], then one col per NAME
-#    Format = "numeric" (dosage 0..4 for tetraploid).
-# =============================================================
-# Light reader that tolerates large files
-ghead <- fread(geno_file, nrows = 5)
-# Try to normalize column names
-setnames(ghead, old = names(ghead),
-         new = str_replace_all(tolower(names(ghead)), c("chromosome"="chrom","chr"="chrom","position"="pos")))
-
-# Expect first three: marker, chrom, pos (any casing). If not exact, try to guess/rename.
-required <- c("marker","chrom","pos")
-cn <- tolower(colnames(ghead))
-# Heuristics to rename
-ren <- list()
-if (!"marker" %in% cn) {
-  # try SNP/ID column
-  cand <- which(cn %in% c("id","snp","markername","marker_id","markerid"))[1]
-  if (length(cand)==1 && !is.na(cand)) ren[[cand]] <- "marker"
-}
-if (!"chrom" %in% cn) {
-  cand <- which(cn %in% c("chrom","chromosome","chr"))[1]
-  if (length(cand)==1 && !is.na(cand)) ren[[cand]] <- "chrom"
-}
-if (!"pos" %in% cn) {
-  cand <- which(cn %in% c("pos","position","bp","bp_position"))[1]
-  if (length(cand)==1 && !is.na(cand)) ren[[cand]] <- "pos"
-}
-
-if (length(ren)) {
-  g <- fread(geno_file)
-  old <- names(g)
-  for (i in seq_along(ren)) {
-    names(g)[as.integer(names(ren)[i])] <- ren[[i]]
-  }
-} else {
-  g <- fread(geno_file)
-  names(g) <- tolower(names(g))
-}
-stopifnot(all(required %in% names(g)))
-
-# Keep only samples present in phenotype
-sample_cols <- intersect(names(g), ph_g$NAME)
-if (length(sample_cols) == 0) {
-  stop("No overlap between genotype sample names and phenotype NAME. ",
-       "Double-check that NAME in phenotypes matches column headers in genotype file.")
-}
-
-g_sub <- g[, c(required, sample_cols), with = FALSE]
-
-# Quick genotype sanity check: dosages should be numeric 0..4 for tetraploid
-# (GWASpoly will also check.)
-# fwrite for GWASpoly input
-geno_out <- file.path(out_dir, "geno_numeric_tetra.csv")
-fwrite(g_sub, geno_out)
-
-# =============================================================
-# 3) Run GWASpoly (LOCO), without PF covariate
-# =============================================================
-ploidy_level <- 4
-data0 <- read.GWASpoly(ploidy = ploidy_level,
-                       pheno.file = pheno_out_noPF,
-                       geno.file  = geno_out,
-                       format = "numeric", n.traits = 2, delim = ",")
-
-# LOCO kinship to reduce proximal contamination
-# (per GWASpoly vignette; see set.K with LOCO = TRUE)
-data0 <- set.K(data0, LOCO = TRUE, n.core = max(1, parallel::detectCores()-1))
-
-# Parameters: filter rare/low-information markers by max genotype frequency
-N <- nrow(data0@pheno)
-params0 <- set.params(geno.freq = 1 - 5/N)  # Jeff’s rule of thumb in vignette
-
-# Test additive and 1-copy dominance in both directions
-models <- c("additive","1-dom")
-
-fit0 <- GWASpoly(data = data0,
-                 models = models,
-                 traits = c("BB_3Jan","BB_15Jan"),
-                 params = params0,
-                 n.core = max(1, parallel::detectCores()-1),
-                 quiet = TRUE)
-
-# Thresholds (M.eff is generally less over-conservative than Bonferroni)
-fit0_thr <- set.threshold(fit0, method = "M.eff", level = 0.05)
-
-# Save results (scores) & plots
-write.GWASpoly(fit0_thr, trait = "BB_3Jan",
-               filename = file.path(out_dir,"BB_3Jan_scores_noPF.csv"),
-               what = "scores")
-write.GWASpoly(fit0_thr, trait = "BB_15Jan",
-               filename = file.path(out_dir,"BB_15Jan_scores_noPF.csv"),
-               what = "scores")
-
-png(file.path(out_dir,"QQ_noPF_BB_3Jan.png"), width=1200, height=900, res=150)
-print(qq.plot(fit0_thr, trait="BB_3Jan")); dev.off()
-
-png(file.path(out_dir,"QQ_noPF_BB_15Jan.png"), width=1200, height=900, res=150)
-print(qq.plot(fit0_thr, trait="BB_15Jan")); dev.off()
-
-png(file.path(out_dir,"Manhattan_noPF.png"), width=1600, height=900, res=150)
-print(manhattan.plot(fit0_thr, traits=c("BB_3Jan","BB_15Jan"))); dev.off()
-
-# Export top QTL (one lead per ~5 Mb window; tweak to your LD)
-qtl_3 <- get.QTL(fit0_thr, traits="BB_3Jan",  models="additive", bp.window = 5e6)
-qtl_15<- get.QTL(fit0_thr, traits="BB_15Jan", models="additive", bp.window = 5e6)
-fwrite(qtl_3,  file.path(out_dir,"QTL_noPF_BB_3Jan.csv"))
-fwrite(qtl_15, file.path(out_dir,"QTL_noPF_BB_15Jan.csv"))
-
-# =============================================================
-# 4) OPTIONAL: add PF covariate and re-run
-#     PF_covariate.csv should be: NAME,PF  (PF = 0/1)
-# =============================================================
-if (file.exists(pf_file)) {
-  pf <- fread(pf_file) %>% mutate(PF = as.factor(PF))
-  ph_pf <- ph_g %>% left_join(pf, by = "NAME")
-  if (any(is.na(ph_pf$PF))) {
-    warning("PF missing for some genotypes; those entries will drop in covariate run.")
-    ph_pf <- ph_pf %>% filter(!is.na(PF))
-  }
-  pheno_out_PF <- file.path(out_dir, "phenotypes_binary_withPF.csv")
-  fwrite(ph_pf[,c("NAME","BB_3Jan","BB_15Jan","PF")], pheno_out_PF)
-  
-  data1 <- read.GWASpoly(ploidy = ploidy_level,
-                         pheno.file = pheno_out_PF,
-                         geno.file  = geno_out,
-                         format = "numeric", n.traits = 2, delim = ",")
-  # LOCO kinship
-  data1 <- set.K(data1, LOCO = TRUE, n.core = max(1, parallel::detectCores()-1))
-  
-  # Include PF as fixed factor (Q+K style fixed covariate)
-  params1 <- set.params(geno.freq = 1 - 5/nrow(data1@pheno),
-                        fixed = "PF", fixed.type = "factor")
-  
-  fit1 <- GWASpoly(data = data1,
-                   models = models,
-                   traits = c("BB_3Jan","BB_15Jan"),
-                   params = params1,
-                   n.core = max(1, parallel::detectCores()-1),
-                   quiet = TRUE)
-  
-  fit1_thr <- set.threshold(fit1, method = "M.eff", level = 0.05)
-  
-  write.GWASpoly(fit1_thr, trait = "BB_3Jan",
-                 filename = file.path(out_dir,"BB_3Jan_scores_withPF.csv"),
-                 what = "scores")
-  write.GWASpoly(fit1_thr, trait = "BB_15Jan",
-                 filename = file.path(out_dir,"BB_15Jan_scores_withPF.csv"),
-                 what = "scores")
-  
-  png(file.path(out_dir,"Manhattan_withPF.png"), width=1600, height=900, res=150)
-  print(manhattan.plot(fit1_thr, traits=c("BB_3Jan","BB_15Jan"))); dev.off()
-  
-  qtl_3_pf  <- get.QTL(fit1_thr, traits="BB_3Jan",  models="additive", bp.window = 5e6)
-  qtl_15_pf <- get.QTL(fit1_thr, traits="BB_15Jan", models="additive", bp.window = 5e6)
-  fwrite(qtl_3_pf,  file.path(out_dir,"QTL_withPF_BB_3Jan.csv"))
-  fwrite(qtl_15_pf, file.path(out_dir,"QTL_withPF_BB_15Jan.csv"))
-} else {
-  message("PF_covariate.csv not found; skipped PF covariate run.")
-}
-
-# =============================================================
-# Done. Outputs in: gwaspoly_budbreak_out/
-
-
-# =============================================================
-# Massive GWASpoly runset: Binary, Percent, BLUPs, BLUEs, PCA
-# Cohorts: ALL / PF-only / FF-only; Re-run with PF covariate
-# Models: additive, 1-dom, general; LOCO kinship
-# =============================================================
-
-rm(list = ls())
-options(stringsAsFactors = FALSE)
-
-# ---- Packages ----
-pkgs <- c("tidyverse","data.table","GWASpoly","ggplot2","stringr",
-          "lme4","lmerTest","emmeans","parallel")
-to_install <- pkgs[!pkgs %in% installed.packages()[,"Package"]]
-if (length(to_install)) install.packages(to_install, dependencies = TRUE)
-invisible(lapply(pkgs, library, character.only = TRUE))
-
-# ---- User paths ----
-pheno_file <- "GWAS_Data_Budbreak.csv"  # your per-cutting phenos
-geno_file  <- "captureseq2025_GATK_postmean_70K_updog_filtered.csv" # dosage 0..4
+# ---- Paths (your exact CSVs) ----
+pheno_file <- "C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets/GWAS_Data_Budbreak.csv"
+geno_file  <- "C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets/captureseq2025_GATK_postmean_70K_updog_filtered.csv"
 out_dir    <- "gwaspoly_runsets"
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+cat("\n[PATH] PHENO:", pheno_file, "\n[PATH] GENO :", geno_file, "\n")
+stopifnot(file.exists(pheno_file), file.exists(geno_file))
+
+# ---- Plot registry (we'll print all Manhattans at the end) ----
+RUN_REGISTRY <- list()
 
 # =============================================================
-# 0) Helper: ID parsing, safe reading, and utilities
+# 0) Helpers
 # =============================================================
-.read_any <- function(path, nrows=0){
-  # fread is fast; fall back to read.csv if needed
-  if (!file.exists(path)) stop("File not found: ", path)
-  tryCatch(
-    fread(path, nrows = ifelse(nrows>0, nrows, -1)),
-    error = function(e) read.csv(path, check.names = FALSE)
-  )
+.read_csv <- function(path, nrows = 0){
+  data.table::fread(path, nrows = ifelse(nrows>0, nrows, -1),
+                    data.table = TRUE, na.strings = c("", "NA"))
 }
-
-get_name <- function(x){
-  # Genotype name = token before first underscore
-  sub("(_.*)$","", x)
+.normalize_names <- function(nm){ gsub("\\s+", " ", trimws(nm)) }
+.strip_suffix <- function(nm) sub("\\.\\d+$", "", nm)
+.find_by_base <- function(cands, names_vec){
+  base <- .strip_suffix(names_vec)
+  idx  <- match(TRUE, base %in% cands)
+  if (is.na(idx)) NA_character_ else names_vec[idx]
 }
-
-get_rep  <- function(x){
-  # Replicate token after first underscore, if present
-  ifelse(grepl("_", x), sub("^[^_]+_","", x), NA_character_)
-}
-
-# ensure numeric and clamp to [0, TBUDS]
 .clamp_counts <- function(v, maxv){
-  v <- suppressWarnings(as.numeric(v))
-  v <- pmax(0, v)
-  v <- if (!missing(maxv)) pmin(v, maxv) else v
+  v <- suppressWarnings(as.numeric(v)); v <- pmax(0, v)
+  if (!missing(maxv)) v <- pmin(v, maxv)
   v
 }
+get_name <- function(x) sub("(_.*)$","", x)   # used for *phenotype* IDs
+get_rep  <- function(x) ifelse(grepl("_", x), sub("^[^_]+_","", x), NA_character_)
 
 # =============================================================
-# 1) Ingest phenotypes; derive Binary, Percent; make tall + wide
-#    (Ignores 20-Dec and 1-Jan, per your directive)
+# 1) Phenotypes: build Binary (>0), Percent
 # =============================================================
-ph_raw <- .read_any(pheno_file)
+ph_raw <- .read_csv(pheno_file)
+names(ph_raw) <- make.unique(.normalize_names(names(ph_raw)), sep = ".")
 
-# Identify columns
-name_col <- if ("Lug Order" %in% names(ph_raw)) "Lug Order" else names(ph_raw)[1]
-buds_col <- c("Total Buds","Total Buds.1","TBuds","Buds","Total_Buds")
-buds_col <- buds_col[buds_col %in% names(ph_raw)]
-if (length(buds_col)==0) stop("Couldn't find a 'Total Buds' column.")
+name_col <- .find_by_base(c("Lug Order","LugOrder","Name","ID"), names(ph_raw))
+if (is.na(name_col)) name_col <- names(ph_raw)[1]
 
-need_dates <- c("3-Jan","15-Jan")
-miss <- setdiff(c(name_col, need_dates), names(ph_raw))
-if (length(miss)) stop("Missing expected columns: ", paste(miss, collapse=", "))
+base_names <- .strip_suffix(names(ph_raw))
+tb_idx     <- base_names %in% c("Total Buds","TBuds","Buds","Total_Buds","Total Buds.1")
+tbuds_cols <- names(ph_raw)[tb_idx]
+if (!length(tbuds_cols)) stop("Couldn't find a 'Total Buds' family column in phenotype CSV.")
+
+col_3jan  <- .find_by_base(c("3-Jan","3 Jan","Jan 3","3Jan"),     names(ph_raw))
+col_15jan <- .find_by_base(c("15-Jan","15 Jan","Jan 15","15Jan"), names(ph_raw))
+if (is.na(col_3jan) || is.na(col_15jan)) {
+  stop("Missing date columns for 3-Jan and/or 15-Jan. Headers (first 30): ",
+       paste(head(names(ph_raw), 30), collapse=" | "))
+}
 
 ph <- ph_raw %>%
-  mutate(NAME      = get_name(.data[[name_col]]),
-         REP       = get_rep(.data[[name_col]]),
-         TBUDS     = coalesce(!!!syms(buds_col))) %>%
-  mutate(`3-Jan`   = .clamp_counts(`3-Jan`,  TBUDS),
-         `15-Jan`  = .clamp_counts(`15-Jan`, TBUDS)) %>%
-  mutate(BIN_3Jan  = as.integer(`3-Jan`  > 0),
-         BIN_15Jan = as.integer(`15-Jan` > 0),
-         PCT_3Jan  = ifelse(TBUDS>0, 100*`3-Jan`/TBUDS, NA_real_),
-         PCT_15Jan = ifelse(TBUDS>0, 100*`15-Jan`/TBUDS, NA_real_))
+  mutate(
+    NAME  = get_name(.data[[name_col]]),
+    REP   = get_rep(.data[[name_col]]),
+    TBUDS = dplyr::coalesce(!!!rlang::syms(tbuds_cols)),
+    VAL_3Jan  = .clamp_counts(.data[[col_3jan]],  TBUDS),
+    VAL_15Jan = .clamp_counts(.data[[col_15jan]], TBUDS),
+    BIN_3Jan  = as.integer(VAL_3Jan  > 0),    # responders = >0 buds broken
+    BIN_15Jan = as.integer(VAL_15Jan > 0),
+    PCT_3Jan  = ifelse(TBUDS > 0, 100*VAL_3Jan  / TBUDS, NA_real_),
+    PCT_15Jan = ifelse(TBUDS > 0, 100*VAL_15Jan / TBUDS, NA_real_)
+  )
+ph$NAME <- as.factor(ph$NAME)
 
-# -------------------------------------------------------------
-# 1A) PF/FF classification by name + override hooks
-# -------------------------------------------------------------
-# Default rule: APF* = PF; A-* = FF
+cat("\n[PHENO] Rows:", nrow(ph), "  Unique genotypes:", length(unique(ph$NAME)), "\n")
+cat("[PHENO] Non-NA counts — 3-Jan:", sum(!is.na(ph$VAL_3Jan)),
+    "  15-Jan:", sum(!is.na(ph$VAL_15Jan)), "\n")
+
+# =============================================================
+# 1A) PF/FF classification (with your overrides)
+# =============================================================
 is_pf_default <- function(nm) startsWith(nm, "APF")
 is_ff_default <- function(nm) startsWith(nm, "A-")
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# TODO: Edit these override vectors to fix exceptions:
-pf_overrides_add <- c(    # e.g., "A-2491T"
-)
-ff_overrides_add <- c(    # e.g., "APF-661TN"
-)
-# Optionally list specific IDs to remove from each class:
-pf_exclude <- c()
-ff_exclude <- c()
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+pf_overrides_add <- c("PrimeArkFreedom","PrimeArkHorizon","APF-661TN")
+ff_overrides_add <- c("Apache","Caddo","Immaculate","Lochness","Natchez",
+                      "Navaho","Osage","Ouachita","Ponca","Stella",
+                      "Superlicious","Tupy","Von")
+ff_overrides_add <- setdiff(ff_overrides_add, "APF-661TN")
+pf_exclude <- c(); ff_exclude <- c()
 
-pf_df <- tibble(NAME = unique(ph$NAME)) %>%
-  mutate(PF = case_when(
-    NAME %in% pf_excludes ~ NA,       # not used
+all_names <- sort(unique(as.character(ph$NAME)))
+PF_tbl <- tibble(NAME = all_names) %>%
+  mutate(PF = dplyr::case_when(
+    NAME %in% pf_exclude ~ NA_integer_,
+    NAME %in% ff_exclude ~ NA_integer_,
     NAME %in% pf_overrides_add ~ 1L,
     NAME %in% ff_overrides_add ~ 0L,
     is_pf_default(NAME) ~ 1L,
@@ -342,46 +114,65 @@ pf_df <- tibble(NAME = unique(ph$NAME)) %>%
     TRUE ~ NA_integer_
   ))
 
-# If you want unknowns to drop in subgroup runs but stay in ALL, keep NA here.
+cat("\n[PF/FF] Assignment summary:\n")
+PF_tbl %>%
+  mutate(Group = dplyr::case_when(PF==1L ~ "PF", PF==0L ~ "FF", TRUE ~ "Unknown")) %>%
+  count(Group) %>% print()
 
 # =============================================================
-# 2) BLUPs & BLUEs at Jan 3 and Jan 15 (rep-aware)
-#     BLUPs: genotype random → conditional modes
-#     BLUEs: genotype fixed → adjusted means via emmeans
+# 2) BLUPs & BLUEs (robust)
 # =============================================================
 mk_blup_blue <- function(df, resp){
-  # df: per-cutting rows with NAME, REP, plus covariates if desired
-  out <- list()
-  # ---- BLUPs (random genotype) ----
-  # Minimal model (intercept only plus random G); add batch/block if you have them
-  m_blup <- lmer(reformulate(termlabels = NULL, response = resp),
-                 data = df %>% filter(!is.na(.data[[resp]])),
-                 REML = TRUE)
-  blups  <- ranef(m_blup, condVar = FALSE)$NAME
-  blups  <- tibble(NAME = rownames(blups),
-                   !!paste0("BLUP_", resp) := as.numeric(blups[["(Intercept)"]]))
-  out$BLUP <- blups
+  d <- df %>% dplyr::filter(!is.na(.data[[resp]]), !is.na(NAME))
+  d$NAME <- factor(d$NAME)
   
-  # ---- BLUEs (fixed genotype) ----
-  m_blue <- lmer(as.formula(paste0(resp, " ~ 1 + NAME")),
-                 data = df %>% filter(!is.na(.data[[resp]])),
-                 REML = TRUE)
-  emm <- emmeans(m_blue, ~ NAME)
-  blues <- as_tibble(emm) %>%
-    transmute(NAME, !!paste0("BLUE_", resp) := as.numeric(emmean))
-  out$BLUE <- blues
-  out
+  nm_blup <- paste0("BLUP_", resp)
+  nm_blue <- paste0("BLUE_", resp)
+  
+  if (dplyr::n_distinct(d$NAME) < 2 || nrow(d) < 5) {
+    message("[BLUP/BLUE] Skipping ", resp, ": not enough data after NA filtering.")
+    return(list(
+      BLUP = tibble::tibble(NAME = character(), !!nm_blup := numeric()),
+      BLUE = tibble::tibble(NAME = character(), !!nm_blue := numeric())
+    ))
+  }
+  
+  blups_tbl <- try({
+    m <- lme4::lmer(stats::as.formula(paste0(resp, " ~ 1 + (1|NAME)")), data = d, REML = TRUE)
+    re <- lme4::ranef(m, condVar = FALSE)$NAME
+    tibble::tibble(NAME = rownames(re), !!nm_blup := as.numeric(re[["(Intercept)"]]))
+  }, silent = TRUE)
+  
+  if (inherits(blups_tbl, "try-error")) {
+    message("[BLUP] Falling back to centered genotype means for ", resp)
+    mu <- mean(d[[resp]], na.rm = TRUE)
+    blups_tbl <- d %>%
+      dplyr::group_by(NAME) %>%
+      dplyr::summarise(!!nm_blup := mean(.data[[resp]], na.rm = TRUE) - mu, .groups = "drop")
+  }
+  
+  blues_tbl <- try({
+    m <- stats::lm(stats::as.formula(paste0(resp, " ~ 0 + NAME")), data = d)
+    est <- stats::coef(m)
+    tibble::tibble(NAME = names(est), !!nm_blue := as.numeric(est))
+  }, silent = TRUE)
+  
+  if (inherits(blues_tbl, "try-error")) {
+    message("[BLUE] Falling back to simple genotype means for ", resp)
+    blues_tbl <- d %>%
+      dplyr::group_by(NAME) %>%
+      dplyr::summarise(!!nm_blue := mean(.data[[resp]], na.rm = TRUE), .groups = "drop")
+  }
+  
+  list(BLUP = blups_tbl, BLUE = blues_tbl)
 }
 
-# Build BLUPs/BLUEs for Percent traits (more informative than counts)
-bb_blup_blue_3  <- mk_blup_blue(ph %>% select(NAME, REP, PCT_3Jan)  %>% drop_na(NAME), "PCT_3Jan")
-bb_blup_blue_15 <- mk_blup_blue(ph %>% select(NAME, REP, PCT_15Jan) %>% drop_na(NAME), "PCT_15Jan")
+bb3  <- mk_blup_blue(ph %>% dplyr::select(NAME, REP, PCT_3Jan)  %>% tidyr::drop_na(NAME), "PCT_3Jan")
+bb15 <- mk_blup_blue(ph %>% dplyr::select(NAME, REP, PCT_15Jan) %>% tidyr::drop_na(NAME), "PCT_15Jan")
 
-# Merge to one table per metric
-BLUP_tbl <- full_join(bb_blup_blue_3$BLUP,  bb_blup_blue_15$BLUP,  by = "NAME")
-BLUE_tbl <- full_join(bb_blup_blue_3$BLUE,  bb_blup_blue_15$BLUE,  by = "NAME")
+BLUP_tbl <- dplyr::full_join(bb3$BLUP,  bb15$BLUP,  by = "NAME")
+BLUE_tbl <- dplyr::full_join(bb3$BLUE,  bb15$BLUE,  by = "NAME")
 
-# Also compute simple genotype-level means (quick continuous traits):
 MEAN_tbl <- ph %>%
   group_by(NAME) %>%
   summarise(
@@ -393,188 +184,262 @@ MEAN_tbl <- ph %>%
   )
 
 # =============================================================
-# 3) PCA from multi-date phenotypes (use BLUPs for robustness)
-#     PC1 ~= overall responsiveness; PC2 ~= timing
+# 3) PCA on BLUPs — safe
 # =============================================================
-pca_src <- BLUP_tbl %>% select(NAME, BLUP_PCT_3Jan = BLUP_PCT_3Jan, BLUP_PCT_15Jan = BLUP_PCT_15Jan)
-pc_complete <- pca_src %>% filter(complete.cases(.))
-PC_tbl <- tibble(NAME = pca_src$NAME,
-                 PC1 = NA_real_, PC2 = NA_real_)
-if (nrow(pc_complete) >= 5) {
-  X <- as.matrix(pc_complete[, -1])
-  P <- prcomp(X, center = TRUE, scale. = TRUE)
-  sc <- as.data.frame(P$x[, 1:2, drop = FALSE])
-  sc$NAME <- pc_complete$NAME
-  PC_tbl <- PC_tbl %>%
-    select(-PC1, -PC2) %>%
-    left_join(sc %>% transmute(NAME, PC1, PC2), by = "NAME")
+pca_src <- BLUP_tbl %>% select(NAME, BLUP_PCT_3Jan, BLUP_PCT_15Jan)
+PC_tbl  <- tibble(NAME = pca_src$NAME, PC1 = NA_real_, PC2 = NA_real_)
+pc_ok   <- pca_src %>% filter(complete.cases(.))
+if (nrow(pc_ok) >= 5) {
+  X <- as.matrix(pc_ok[, -1, drop = FALSE])
+  sds <- apply(X, 2, sd, na.rm = TRUE)
+  keep_cols <- which(sds > 0 & is.finite(sds))
+  if (length(keep_cols) >= 2) {
+    X2 <- scale(X[, keep_cols, drop = FALSE])
+    P  <- prcomp(X2, center = FALSE, scale. = FALSE)
+    sc <- as.data.frame(P$x[, 1:2, drop = FALSE]); sc$NAME <- pc_ok$NAME
+    PC_tbl <- PC_tbl %>% select(-PC1,-PC2) %>%
+      left_join(sc %>% transmute(NAME, PC1, PC2 = ifelse(ncol(P$x) >= 2, PC2, NA_real_)), by = "NAME")
+  } else if (length(keep_cols) == 1) {
+    z <- as.numeric(scale(X[, keep_cols, drop = TRUE]))
+    sc <- tibble(NAME = pc_ok$NAME, PC1 = z, PC2 = NA_real_)
+    PC_tbl <- PC_tbl %>% select(-PC1,-PC2) %>% left_join(sc, by = "NAME")
+    message("[PCA] Only one informative BLUP column; using its z-score as PC1 (PC2=NA).")
+  } else {
+    message("[PCA] No informative BLUP columns; skipping PC scores.")
+  }
+} else {
+  message("[PCA] Not enough complete rows for PCA (need ≥5).")
 }
 
 # =============================================================
-# 4) Assemble master phenotype panel with all requested traits
-#     - Binary (>0): BIN_3Jan, BIN_15Jan
-#     - Continuous (means): PCT_3Jan, PCT_15Jan
-#     - BLUPs: BLUP_PCT_3Jan, BLUP_PCT_15Jan
-#     - BLUEs: BLUE_PCT_3Jan, BLUE_PCT_15Jan
-#     - PCA: PC1, PC2
+# 4) Master phenotype panel
 # =============================================================
 PH_MASTER <- MEAN_tbl %>%
   full_join(BLUP_tbl, by = "NAME") %>%
   full_join(BLUE_tbl, by = "NAME") %>%
   full_join(PC_tbl,  by = "NAME") %>%
-  left_join(pf_df,   by = "NAME")    # adds PF as 0/1/NA
+  left_join(PF_tbl,  by = "NAME")
 
 # =============================================================
-# 5) Prepare genotype dosage for GWASpoly (0..4)
+# 5) Genotype matrix — harmonize sample names to phenotype NAMEs
+#    (Main fix: replace "_" -> "-" in genotype headers)
 # =============================================================
-message("Reading genotype matrix (this may take a bit)...")
-G <- .read_any(geno_file)
-names(G) <- tolower(names(G))
-# Standardize first columns
-ren_map <- c("markername"="marker","marker_id"="marker","markerid"="marker","id"="marker",
-             "chromosome"="chrom","chr"="chrom","position"="pos","bp"="pos","bp_position"="pos")
-for (k in names(ren_map)) {
-  if (k %in% names(G)) names(G)[names(G)==k] <- ren_map[[k]]
+message("\nReading genotype matrix & harmonizing sample names...")
+G <- .read_csv(geno_file)
+
+# Identify structural columns (case-insensitive)
+gn <- names(G)
+idx_marker <- which(tolower(gn) %in% c("marker","markername","marker_id","markerid","id"))[1]
+idx_chrom  <- which(tolower(gn) %in% c("chrom","chromosome","chr"))[1]
+idx_pos    <- which(tolower(gn) %in% c("pos","position","bp","bp_position"))[1]
+if (is.na(idx_marker) || is.na(idx_chrom) || is.na(idx_pos))
+  stop("Genotype file must have marker/chrom/pos (any casing). Headers seen: ",
+       paste(head(names(G), 30), collapse=" | "))
+
+names(G)[idx_marker] <- "marker"
+names(G)[idx_chrom]  <- "chrom"
+names(G)[idx_pos]    <- "pos"
+
+geno_samples <- setdiff(names(G), c("marker","chrom","pos"))
+pheno_names  <- as.character(PH_MASTER$NAME)
+
+# 1) Exact overlap
+exact_overlap <- intersect(geno_samples, pheno_names)
+
+# 2) Underscore→hyphen normalization for genotype headers
+geno_norm <- tibble(
+  orig = geno_samples,
+  hyph = gsub("_","-", geno_samples, fixed = TRUE)
+)
+
+hyph_overlap <- intersect(geno_norm$hyph, pheno_names)
+
+cat("[GENO] Exact overlap:", length(exact_overlap),
+    " | Overlap after '_'→'-':", length(hyph_overlap), "\n")
+
+# Build rename map for genotype columns where hyph matches a phenotype NAME
+need_rename <- geno_norm %>%
+  filter(hyph %in% pheno_names & orig != hyph)
+
+# Avoid collisions: if a hyph name already exists as a column, drop that rename
+need_rename <- need_rename %>%
+  filter(!(hyph %in% names(G)))
+
+# If multiple orig map to same hyph, keep the first
+if (any(duplicated(need_rename$hyph))) {
+  dups <- unique(need_rename$hyph[duplicated(need_rename$hyph)])
+  message("[GENO] Multiple genotype columns map to the same NAME after '_'→'-'. Keeping first for: ",
+          paste(dups, collapse=", "))
+  need_rename <- need_rename %>% group_by(hyph) %>% slice(1) %>% ungroup()
 }
-req <- c("marker","chrom","pos")
-stopifnot(all(req %in% names(G)))
 
-# Sample intersection
-samp_cols <- intersect(names(G), PH_MASTER$NAME)
-if (!length(samp_cols)) stop("No overlap between genotype columns and phenotype NAMEs.")
-G_sub <- G[, c(req, samp_cols), drop = FALSE]
+# Apply renames
+if (nrow(need_rename) > 0) {
+  for (i in seq_len(nrow(need_rename))) {
+    data.table::setnames(G, old = need_rename$orig[i], new = need_rename$hyph[i])
+  }
+}
 
-# Save once (reused by all runs)
+# Final overlap
+final_samples <- setdiff(names(G), c("marker","chrom","pos"))
+samp_cols <- intersect(final_samples, pheno_names)
+cat("[GENO] Final sample overlap with phenos:", length(samp_cols), "\n")
+
+if (length(samp_cols) < 20) {
+  miss_from_geno  <- setdiff(pheno_names, final_samples)
+  miss_from_pheno <- setdiff(final_samples, pheno_names)
+  message("[GENO] Low overlap; examples (first 20 each):\n  - In PHENO not in GENO: ",
+          paste(head(miss_from_geno, 20), collapse=", "),
+          "\n  - In GENO not in PHENO: ",
+          paste(head(miss_from_pheno, 20), collapse=", "))
+}
+
+# Write subset for GWASpoly
+keep_cols <- c("marker","chrom","pos", samp_cols)
+G_sub <- as.data.table(G)[, ..keep_cols]
 geno_out <- file.path(out_dir, "geno_numeric_tetra.csv")
-fwrite(G_sub, geno_out)
+data.table::fwrite(G_sub, geno_out)
 
 # =============================================================
-# 6) Define run grid: cohorts × covariate × traits
+# 6) Run grid: cohorts × covariate × trait-groups
 # =============================================================
-# Cohorts
 cohorts <- list(
   ALL = PH_MASTER,
   PF  = PH_MASTER %>% filter(PF == 1L),
   FF  = PH_MASTER %>% filter(PF == 0L)
 )
-
-# Covariate mode
-cov_modes <- c("noPFcov","withPFcov")
-
-# Trait sets to run (feel free to toggle)
+cov_modes   <- c("noPFcov","withPFcov")
 trait_lists <- list(
   BINARY = c("BIN_3Jan","BIN_15Jan"),
   PCT    = c("PCT_3Jan","PCT_15Jan"),
   BLUP   = c("BLUP_PCT_3Jan","BLUP_PCT_15Jan"),
   BLUE   = c("BLUE_PCT_3Jan","BLUE_PCT_15Jan"),
-  PCA    = c("PC1","PC2")         # PC2 optional; comment out if not needed
+  PCA    = c("PC1","PC2")
 )
-
-# GWASpoly models
 models_use <- c("additive","1-dom","general")
 
 # =============================================================
-# 7) Core runner: builds a pheno CSV and runs GWASpoly
+# 7) Core runner
+#    - clamps geno.freq into (0,1) to prevent errors when N is tiny
 # =============================================================
 run_one <- function(df, trait_vec, cov_mode, cohort_name, tag){
-  df_use <- df %>% select(NAME, all_of(trait_vec), PF)
-  # Drop traits with all NA (or constant)
+  df_use <- df %>% dplyr::select(NAME, dplyr::all_of(trait_vec), PF)
+  
   keep <- trait_vec[sapply(trait_vec, function(t) {
-    v <- df_use[[t]]
-    any(!is.na(v)) && (length(unique(na.omit(v))) > 1)
+    v <- df_use[[t]]; any(!is.na(v)) && (length(unique(na.omit(v))) > 1)
   })]
-  if (length(keep) == 0) {
-    message("[SKIP] No informative traits for ", tag, " ", cohort_name, " ", cov_mode)
+  if (!length(keep)) {
+    message("[SKIP] No informative traits for ", tag, " | ", cohort_name, " | ", cov_mode)
     return(invisible(NULL))
   }
   
-  # Build pheno table for GWASpoly
   pheno_out <- file.path(out_dir, paste0("pheno_", tag, "_", cohort_name, "_", cov_mode, ".csv"))
   if (cov_mode == "withPFcov") {
-    # PF covariate requires variability; if all PF are same (e.g., PF-only cohort), drop covariate
     if (!("PF" %in% names(df_use)) || length(unique(na.omit(df_use$PF))) < 2) {
-      message("[INFO] PF covariate constant/absent in ", cohort_name, "; running without PF covariate.")
-      fwrite(df_use %>% select(NAME, all_of(keep)), pheno_out)
+      message("[INFO] PF covariate constant/absent in ", cohort_name, "; running WITHOUT PF covariate.")
+      data.table::fwrite(df_use %>% dplyr::select(NAME, dplyr::all_of(keep)), pheno_out)
       fixed_formula <- NULL
     } else {
-      fwrite(df_use %>% select(NAME, all_of(keep), PF), pheno_out)
-      fixed_formula <- "PF"  # factor fixed in set.params
+      data.table::fwrite(df_use %>% dplyr::select(NAME, dplyr::all_of(keep), PF), pheno_out)
+      fixed_formula <- "PF"
     }
   } else {
-    fwrite(df_use %>% select(NAME, all_of(keep)), pheno_out)
+    data.table::fwrite(df_use %>% dplyr::select(NAME, dplyr::all_of(keep)), pheno_out)
     fixed_formula <- NULL
   }
   
-  # ---- Read GWASpoly project ----
-  data_gp <- read.GWASpoly(
-    ploidy    = 4,
-    pheno.file= pheno_out,
-    geno.file = geno_out,
-    format    = "numeric",
-    n.traits  = length(keep),
-    delim     = ","
-  )
-  
-  # ---- LOCO kinship ----
+  data_gp <- read.GWASpoly(ploidy=4, pheno.file=pheno_out, geno.file=geno_out,
+                           format="numeric", n.traits=length(keep), delim=",")
   data_gp <- set.K(data_gp, LOCO = TRUE, n.core = max(1, parallel::detectCores()-1))
   
-  # ---- Params ----
   N <- nrow(data_gp@pheno)
+  gf <- 1 - 5/N
+  if (!is.finite(gf) || gf <= 0 || gf >= 1) gf <- 0.95  # safe fallback
+  gf <- max(0.01, min(0.99, gf))
+  
   params <- set.params(
-    geno.freq  = 1 - 5/N,                    # light MAF-ish filter
+    geno.freq  = gf,
     fixed      = if (is.null(fixed_formula)) NULL else fixed_formula,
     fixed.type = if (is.null(fixed_formula)) NULL else "factor"
   )
   
-  # ---- Fit ----
-  fit <- GWASpoly(
-    data   = data_gp,
-    models = models_use,
-    traits = keep,
-    params = params,
-    n.core = max(1, parallel::detectCores()-1),
-    quiet  = TRUE
-  )
-  
+  fit <- GWASpoly(data=data_gp, models=models_use, traits=keep, params=params,
+                  n.core=max(1, parallel::detectCores()-1), quiet=TRUE)
   fit_thr <- set.threshold(fit, method = "M.eff", level = 0.05)
   
-  # ---- Save outputs ----
+  # Save tables (scores + additive QTL)
   for (tr in keep) {
     base <- file.path(out_dir, paste0("GWAS_", tag, "_", cohort_name, "_", cov_mode, "_", tr))
     write.GWASpoly(fit_thr, trait = tr, filename = paste0(base, "_scores.csv"), what = "scores")
-    # Top QTL (coarse LD window; tweak for your genome)
     qtl <- get.QTL(fit_thr, traits = tr, models = "additive", bp.window = 5e6)
-    fwrite(qtl, paste0(base, "_QTL.csv"))
-    # Plots
-    png(paste0(base, "_QQ.png"), width = 1200, height = 900, res = 150)
-    print(qq.plot(fit_thr, trait = tr)); dev.off()
+    data.table::fwrite(qtl, paste0(base, "_QTL.csv"))
   }
-  # Manhattan across all kept traits
-  man_base <- file.path(out_dir, paste0("GWAS_", tag, "_", cohort_name, "_", cov_mode, "_Manhattan.png"))
-  png(man_base, width = 1800, height = 1000, res = 150)
-  print(manhattan.plot(fit_thr, traits = keep)); dev.off()
   
+  RUN_REGISTRY[[length(RUN_REGISTRY) + 1]] <<- list(
+    fit     = fit_thr,
+    traits  = keep,
+    tag     = tag,
+    cohort  = cohort_name,
+    covmode = cov_mode
+  )
   invisible(TRUE)
 }
 
 # =============================================================
-# 8) Run the full grid
+# 8) Execute full grid
 # =============================================================
 for (cohort_name in names(cohorts)) {
   dfC <- cohorts[[cohort_name]]
   message("\n=== Cohort: ", cohort_name, " | N=", nrow(dfC), " ===")
-  
   for (cov_mode in cov_modes) {
     for (tag in names(trait_lists)) {
-      trait_vec <- trait_lists[[tag]]
-      run_one(df = dfC, trait_vec = trait_vec, cov_mode = cov_mode,
-              cohort_name = cohort_name, tag = tag)
+      run_one(df = dfC,
+              trait_vec = trait_lists[[tag]],
+              cov_mode = cov_mode,
+              cohort_name = cohort_name,
+              tag = tag)
     }
   }
 }
 
-message("\nAll runs finished. Results in: ", normalizePath(out_dir))
 # =============================================================
-# End
+# 9) End-of-script: print ALL Manhattan plots to Plots pane
 # =============================================================
+plot_all_manhattans <- function(registry, arrange_grids = FALSE, ncol = 3){
+  if (!is.list(registry) || length(registry) == 0) {
+    message("No GWAS runs were registered; nothing to plot.")
+    return(invisible(TRUE))
+  }
+  can_grid <- arrange_grids && requireNamespace("cowplot", quietly = TRUE)
+  plot_list <- list()
+  
+  for (i in seq_along(registry)) {
+    r <- registry[[i]]
+    for (tr in r$traits) {
+      lbl <- paste0(
+        "Manhattan — ", r$tag,
+        " | Cohort: ", r$cohort,
+        " | ", ifelse(r$covmode=="withPFcov","with PF covariate","no PF covariate"),
+        " | Trait: ", tr
+      )
+      p <- try(manhattan.plot(r$fit, traits = tr), silent = TRUE)
+      if (inherits(p, "try-error") || !inherits(p, "ggplot")) {
+        manhattan.plot(r$fit, traits = tr)
+        try(title(lbl), silent = TRUE)
+      } else {
+        p <- p + ggplot2::ggtitle(lbl)
+        if (can_grid) plot_list[[length(plot_list)+1]] <- p else print(p)
+      }
+    }
+  }
+  if (can_grid && length(plot_list)) {
+    per_page <- ncol * 2
+    chunks <- split(plot_list, ceiling(seq_along(plot_list)/per_page))
+    for (pg in seq_along(chunks)) print(cowplot::plot_grid(plotlist = chunks[[pg]], ncol = ncol))
+  }
+  invisible(TRUE)
+}
 
+cat("\n--- Printing all Manhattan plots to the Plots pane ---\n")
+plot_all_manhattans(RUN_REGISTRY, arrange_grids = FALSE, ncol = 3)
+cat("\nDone. Tables saved in: ", normalizePath(out_dir), "\n")
