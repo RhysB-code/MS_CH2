@@ -3,7 +3,7 @@
 #  - Traits: Binary (>0), Percent, BLUPs, BLUEs, PCA (PC1/PC2)
 #  - Dates used: Jan 3, Jan 15 (ignores Dec 20 & Jan 1)
 #  - Cohorts: ALL / PF-only (APF*) / FF-only (A-*)
-#  - PF covariate: with and without (auto-skip if constant)
+#  - PF covariate: ONLY for ALL cohort (mixed PF/FF); skipped for homogeneous PF/FF cohorts
 #  - Models: additive, 1-dom, general  (LOCO kinship)
 #  - END: All Manhattan plots printed to Plots pane, labeled
 # =============================================================
@@ -99,7 +99,6 @@ pf_overrides_add <- c("PrimeArkFreedom","PrimeArkHorizon","APF-661TN")
 ff_overrides_add <- c("Apache","Caddo","Immaculate","Lochness","Natchez",
                       "Navaho","Osage","Ouachita","Ponca","Stella",
                       "Superlicious","Tupy","Von")
-ff_overrides_add <- setdiff(ff_overrides_add, "APF-661TN")
 pf_exclude <- c(); ff_exclude <- c()
 
 all_names <- sort(unique(as.character(ph$NAME)))
@@ -304,10 +303,10 @@ data.table::fwrite(G_sub, geno_out)
 # 6) Run grid: cohorts × covariate × trait-groups
 # =============================================================
 cohorts <- list(
-  ALL = PH_MASTER,
-  PF  = PH_MASTER %>% filter(PF == 1L),
-  FF  = PH_MASTER %>% filter(PF == 0L)
+  ALL = PH_MASTER,                       # mixed PF/FF
+  FF  = PH_MASTER %>% filter(PF == 0L)   # FF-only
 )
+
 cov_modes   <- c("noPFcov","withPFcov")
 trait_lists <- list(
   BINARY = c("BIN_3Jan","BIN_15Jan"),
@@ -318,6 +317,7 @@ trait_lists <- list(
 )
 models_use <- c("additive","1-dom","general")
 
+# =============================================================
 # =============================================================
 # 7) Core runner
 #    - clamps geno.freq into (0,1) to prevent errors when N is tiny
@@ -386,19 +386,24 @@ run_one <- function(df, trait_vec, cov_mode, cohort_name, tag){
 }
 
 # =============================================================
-# 8) Execute full grid
+# 8) Execute full grid (PF covariate ONLY for ALL)
 # =============================================================
 for (cohort_name in names(cohorts)) {
   dfC <- cohorts[[cohort_name]]
   message("\n=== Cohort: ", cohort_name, " | N=", nrow(dfC), " ===")
-  for (cov_mode in cov_modes) {
-    for (tag in names(trait_lists)) {
-      run_one(df = dfC,
-              trait_vec = trait_lists[[tag]],
-              cov_mode = cov_mode,
-              cohort_name = cohort_name,
-              tag = tag)
-    }
+  
+  # Policy: ALL -> withPFcov only; FF -> noPFcov only
+  cov_mode <- if (cohort_name == "ALL") "withPFcov" else "noPFcov"
+  message("  Running covariate mode: ", cov_mode)
+  
+  for (tag in names(trait_lists)) {
+    run_one(
+      df        = dfC,
+      trait_vec = trait_lists[[tag]],
+      cov_mode  = cov_mode,
+      cohort_name = cohort_name,
+      tag = tag
+    )
   }
 }
 
@@ -443,3 +448,14 @@ plot_all_manhattans <- function(registry, arrange_grids = FALSE, ncol = 3){
 cat("\n--- Printing all Manhattan plots to the Plots pane ---\n")
 plot_all_manhattans(RUN_REGISTRY, arrange_grids = FALSE, ncol = 3)
 cat("\nDone. Tables saved in: ", normalizePath(out_dir), "\n")
+
+# Optional: Summary of completed runs (add this if desired)
+cat("Total GWAS runs completed:", length(RUN_REGISTRY), "\n")
+if (length(RUN_REGISTRY) > 0) {
+  summary_runs <- tibble(
+    Cohort = sapply(RUN_REGISTRY, `[[`, "cohort"),
+    Cov_Mode = sapply(RUN_REGISTRY, `[[`, "covmode"),
+    Traits = sapply(RUN_REGISTRY, function(x) paste(x$traits, collapse = ", "))
+  )
+  print(summary_runs)
+}
