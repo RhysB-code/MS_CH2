@@ -1,0 +1,644 @@
+# =============================================================
+# Blackberry budbreak GWAS (tetraploid) — modular single-run GWAS
+#  - Builds phenotypes: Binary, Percent, BLUPs, BLUEs, PCA (PC1/PC2)
+#  - Run menu IDs 01–20 (FF/PF and FF-only, single trait each)
+#  - PF covariate only when requested by run config
+#  - Manhattan plots: high-res PNGs to Desktop/GWASCHILL_OUTPUTS
+# =============================================================
+
+rm(list = ls())
+options(stringsAsFactors = FALSE)
+
+# ---- Packages ----
+pkgs <- c("tidyverse","data.table","GWASpoly","stringr",
+          "lme4","lmerTest","emmeans","parallel")
+to_install <- pkgs[!pkgs %in% installed.packages()[,"Package"]]
+if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+# ---- Paths (your exact CSVs) ----
+pheno_file <- "C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets/GWAS_Data_Budbreak.csv"
+geno_file  <- "C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets/captureseq2025_GATK_postmean_70K_updog_filtered.csv"
+
+# Output folders
+out_dir    <- "gwaspoly_runsets"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+mp_outdir  <- "C:/Users/RhysB/Desktop/GWASCHILL_OUTPUTS"
+if (!dir.exists(mp_outdir)) {
+  dir.create(mp_outdir, recursive = TRUE, showWarnings = FALSE)
+}
+
+cat("\n[PATH] PHENO:", pheno_file,
+    "\n[PATH] GENO :", geno_file,
+    "\n[OUT]  GWAS tables:", normalizePath(out_dir),
+    "\n[OUT]  Manhattan PNGs:", normalizePath(mp_outdir),
+    "\n")
+
+stopifnot(file.exists(pheno_file), file.exists(geno_file))
+
+# =============================================================
+# 0) Helpers
+# =============================================================
+.read_csv <- function(path, nrows = 0){
+  data.table::fread(
+    path,
+    nrows = ifelse(nrows > 0, nrows, -1),
+    data.table = TRUE,
+    na.strings = c("", "NA")
+  )
+}
+
+.normalize_names <- function(nm){ gsub("\\s+", " ", trimws(nm)) }
+.strip_suffix    <- function(nm) sub("\\.\\d+$", "", nm)
+
+.find_by_base <- function(cands, names_vec){
+  base <- .strip_suffix(names_vec)
+  idx  <- match(TRUE, base %in% cands)
+  if (is.na(idx)) NA_character_ else names_vec[idx]
+}
+
+.clamp_counts <- function(v, maxv){
+  v <- suppressWarnings(as.numeric(v))
+  v <- pmax(0, v)
+  if (!missing(maxv)) v <- pmin(v, maxv)
+  v
+}
+
+get_name <- function(x) sub("(_.*)$","", x)   # phenotypic NAME
+get_rep  <- function(x) ifelse(grepl("_", x), sub("^[^_]+_","", x), NA_character_)
+
+save_png_hq <- function(plot, filename, width = 12, height = 8, dpi = 600){
+  ggplot2::ggsave(
+    filename = filename,
+    plot     = plot,
+    width    = width,
+    height   = height,
+    dpi      = dpi,
+    units    = "in",
+    type     = "cairo-png"
+  )
+}
+
+# =============================================================
+# 1) Phenotypes: Binary, Percent (Jan 3 and Jan 15)
+# =============================================================
+ph_raw <- .read_csv(pheno_file)
+names(ph_raw) <- make.unique(.normalize_names(names(ph_raw)), sep = ".")
+
+name_col <- .find_by_base(c("Lug Order","LugOrder","Name","ID"), names(ph_raw))
+if (is.na(name_col)) name_col <- names(ph_raw)[1]
+
+base_names <- .strip_suffix(names(ph_raw))
+tb_idx     <- base_names %in% c("Total Buds","TBuds","Buds","Total_Buds","Total Buds.1")
+tbuds_cols <- names(ph_raw)[tb_idx]
+if (!length(tbuds_cols))
+  stop("Couldn't find a 'Total Buds' family column in phenotype CSV.")
+
+col_3jan  <- .find_by_base(c("3-Jan","3 Jan","Jan 3","3Jan"),     names(ph_raw))
+col_15jan <- .find_by_base(c("15-Jan","15 Jan","Jan 15","15Jan"), names(ph_raw))
+if (is.na(col_3jan) || is.na(col_15jan)) {
+  stop("Missing date columns for 3-Jan and/or 15-Jan. Headers (first 30): ",
+       paste(head(names(ph_raw), 30), collapse=" | "))
+}
+
+ph <- ph_raw %>%
+  dplyr::mutate(
+    NAME  = get_name(.data[[name_col]]),
+    REP   = get_rep(.data[[name_col]]),
+    TBUDS = dplyr::coalesce(!!!rlang::syms(tbuds_cols)),
+    VAL_3Jan  = .clamp_counts(.data[[col_3jan]],  TBUDS),
+    VAL_15Jan = .clamp_counts(.data[[col_15jan]], TBUDS),
+    BIN_3Jan  = as.integer(VAL_3Jan  > 0),    # responders = >0 buds broken
+    BIN_15Jan = as.integer(VAL_15Jan > 0),
+    PCT_3Jan  = ifelse(TBUDS > 0, 100*VAL_3Jan  / TBUDS, NA_real_),
+    PCT_15Jan = ifelse(TBUDS > 0, 100*VAL_15Jan / TBUDS, NA_real_)
+  )
+
+ph$NAME <- as.factor(ph$NAME)
+
+cat("\n[PHENO] Rows:", nrow(ph),
+    "  Unique genotypes:", length(unique(ph$NAME)), "\n")
+cat("[PHENO] Non-NA counts — 3-Jan:", sum(!is.na(ph$VAL_3Jan)),
+    "  15-Jan:", sum(!is.na(ph$VAL_15Jan)), "\n")
+
+# =============================================================
+# 1A) PF/FF classification (with overrides)
+# =============================================================
+is_pf_default <- function(nm) startsWith(nm, "APF")
+is_ff_default <- function(nm) startsWith(nm, "A-")
+
+pf_overrides_add <- c("PrimeArkFreedom","PrimeArkHorizon","APF-661TN")
+ff_overrides_add <- c("Apache","Caddo","Immaculate","Lochness","Natchez",
+                      "Navaho","Osage","Ouachita","Ponca","Stella",
+                      "Superlicious","Tupy","Von")
+pf_exclude <- c()
+ff_exclude <- c()
+
+all_names <- sort(unique(as.character(ph$NAME)))
+PF_tbl <- tibble::tibble(NAME = all_names) %>%
+  dplyr::mutate(
+    PF = dplyr::case_when(
+      NAME %in% pf_exclude ~ NA_integer_,
+      NAME %in% ff_exclude ~ NA_integer_,
+      NAME %in% pf_overrides_add ~ 1L,
+      NAME %in% ff_overrides_add ~ 0L,
+      is_pf_default(NAME) ~ 1L,
+      is_ff_default(NAME) ~ 0L,
+      TRUE ~ NA_integer_
+    )
+  )
+
+cat("\n[PF/FF] Assignment summary:\n")
+PF_tbl %>%
+  dplyr::mutate(
+    Group = dplyr::case_when(
+      PF == 1L ~ "PF",
+      PF == 0L ~ "FF",
+      TRUE     ~ "Unknown"
+    )
+  ) %>%
+  dplyr::count(Group) %>%
+  print()
+
+# =============================================================
+# 2) BLUPs & BLUEs for percent traits
+# =============================================================
+mk_blup_blue <- function(df, resp){
+  d <- df %>% dplyr::filter(!is.na(.data[[resp]]), !is.na(NAME))
+  d$NAME <- factor(d$NAME)
+  
+  nm_blup <- paste0("BLUP_", resp)
+  nm_blue <- paste0("BLUE_", resp)
+  
+  if (dplyr::n_distinct(d$NAME) < 2 || nrow(d) < 5) {
+    message("[BLUP/BLUE] Skipping ", resp, ": not enough data.")
+    return(list(
+      BLUP = tibble::tibble(NAME = character(), !!nm_blup := numeric()),
+      BLUE = tibble::tibble(NAME = character(), !!nm_blue := numeric())
+    ))
+  }
+  
+  blups_tbl <- try({
+    m <- lme4::lmer(stats::as.formula(paste0(resp, " ~ 1 + (1|NAME)")),
+                    data = d, REML = TRUE)
+    re <- lme4::ranef(m, condVar = FALSE)$NAME
+    tibble::tibble(
+      NAME      = rownames(re),
+      !!nm_blup := as.numeric(re[["(Intercept)"]])
+    )
+  }, silent = TRUE)
+  
+  if (inherits(blups_tbl, "try-error")) {
+    message("[BLUP] Falling back to centered genotype means for ", resp)
+    mu <- mean(d[[resp]], na.rm = TRUE)
+    blups_tbl <- d %>%
+      dplyr::group_by(NAME) %>%
+      dplyr::summarise(
+        !!nm_blup := mean(.data[[resp]], na.rm = TRUE) - mu,
+        .groups = "drop"
+      )
+  }
+  
+  blues_tbl <- try({
+    m   <- stats::lm(stats::as.formula(paste0(resp, " ~ 0 + NAME")), data = d)
+    est <- stats::coef(m)
+    tibble::tibble(
+      NAME      = names(est),
+      !!nm_blue := as.numeric(est)
+    )
+  }, silent = TRUE)
+  
+  if (inherits(blues_tbl, "try-error")) {
+    message("[BLUE] Falling back to simple genotype means for ", resp)
+    blues_tbl <- d %>%
+      dplyr::group_by(NAME) %>%
+      dplyr::summarise(
+        !!nm_blue := mean(.data[[resp]], na.rm = TRUE),
+        .groups = "drop"
+      )
+  }
+  
+  list(BLUP = blups_tbl, BLUE = blues_tbl)
+}
+
+bb3  <- mk_blup_blue(ph %>% dplyr::select(NAME, REP, PCT_3Jan)  %>% tidyr::drop_na(NAME), "PCT_3Jan")
+bb15 <- mk_blup_blue(ph %>% dplyr::select(NAME, REP, PCT_15Jan) %>% tidyr::drop_na(NAME), "PCT_15Jan")
+
+BLUP_tbl <- dplyr::full_join(bb3$BLUP,  bb15$BLUP,  by = "NAME")
+BLUE_tbl <- dplyr::full_join(bb3$BLUE,  bb15$BLUE,  by = "NAME")
+
+MEAN_tbl <- ph %>%
+  dplyr::group_by(NAME) %>%
+  dplyr::summarise(
+    BIN_3Jan  = as.integer(any(BIN_3Jan  == 1, na.rm = TRUE)),
+    BIN_15Jan = as.integer(any(BIN_15Jan == 1, na.rm = TRUE)),
+    PCT_3Jan  = mean(PCT_3Jan,  na.rm = TRUE),
+    PCT_15Jan = mean(PCT_15Jan, na.rm = TRUE),
+    .groups   = "drop"
+  )
+
+# =============================================================
+# 3) PCA on BLUPs (PC1/PC2)
+# =============================================================
+pca_src <- BLUP_tbl %>%
+  dplyr::select(NAME, BLUP_PCT_3Jan, BLUP_PCT_15Jan)
+
+PC_tbl  <- tibble::tibble(NAME = pca_src$NAME,
+                          PC1  = NA_real_,
+                          PC2  = NA_real_)
+
+pc_ok <- pca_src %>% dplyr::filter(complete.cases(.))
+
+if (nrow(pc_ok) >= 5) {
+  X   <- as.matrix(pc_ok[, -1, drop = FALSE])
+  sds <- apply(X, 2, sd, na.rm = TRUE)
+  keep_cols <- which(sds > 0 & is.finite(sds))
+  
+  if (length(keep_cols) >= 2) {
+    X2 <- scale(X[, keep_cols, drop = FALSE])
+    P  <- prcomp(X2, center = FALSE, scale. = FALSE)
+    
+    sc <- as.data.frame(P$x[, 1:2, drop = FALSE])
+    sc$NAME <- pc_ok$NAME
+    
+    PC_tbl <- PC_tbl %>%
+      dplyr::select(-PC1, -PC2) %>%
+      dplyr::left_join(
+        sc %>% dplyr::transmute(
+          NAME,
+          PC1,
+          PC2 = ifelse(ncol(P$x) >= 2, PC2, NA_real_)
+        ),
+        by = "NAME"
+      )
+  } else if (length(keep_cols) == 1) {
+    z  <- as.numeric(scale(X[, keep_cols, drop = TRUE]))
+    sc <- tibble::tibble(NAME = pc_ok$NAME, PC1 = z, PC2 = NA_real_)
+    
+    PC_tbl <- PC_tbl %>%
+      dplyr::select(-PC1, -PC2) %>%
+      dplyr::left_join(sc, by = "NAME")
+    
+    message("[PCA] Only one informative BLUP column; using its z-score as PC1 (PC2 = NA).")
+  } else {
+    message("[PCA] No informative BLUP columns; skipping PC scores.")
+  }
+} else {
+  message("[PCA] Not enough complete rows for PCA (need ≥5).")
+}
+
+# =============================================================
+# 4) Master phenotype panel (with renamed traits for run IDs)
+# =============================================================
+PH_MASTER <- MEAN_tbl %>%
+  dplyr::full_join(BLUP_tbl, by = "NAME") %>%
+  dplyr::full_join(BLUE_tbl, by = "NAME") %>%
+  dplyr::full_join(PC_tbl,  by = "NAME") %>%
+  dplyr::left_join(PF_tbl,  by = "NAME") %>%
+  dplyr::mutate(
+    # Percent traits (rename PCT -> PERCENT for run config)
+    PERCENT_3Jan  = PCT_3Jan,
+    PERCENT_15Jan = PCT_15Jan,
+    
+    # BLUP percent traits
+    BLUP_PERCENT_3Jan  = BLUP_PCT_3Jan,
+    BLUP_PERCENT_15Jan = BLUP_PCT_15Jan,
+    
+    # BLUE percent traits
+    BLUE_PERCENT_3Jan  = BLUE_PCT_3Jan,
+    BLUE_PERCENT_15Jan = BLUE_PCT_15Jan
+  )
+
+# =============================================================
+# 5) Genotype matrix: harmonize sample names, write numeric file
+# =============================================================
+message("\n[GENO] Reading genotype matrix & harmonizing sample names...")
+G <- .read_csv(geno_file)
+
+gn <- names(G)
+idx_marker <- which(tolower(gn) %in% c("marker","markername","marker_id","markerid","id"))[1]
+idx_chrom  <- which(tolower(gn) %in% c("chrom","chromosome","chr"))[1]
+idx_pos    <- which(tolower(gn) %in% c("pos","position","bp","bp_position"))[1]
+
+if (is.na(idx_marker) || is.na(idx_chrom) || is.na(idx_pos))
+  stop("Genotype file must have marker/chrom/pos. Headers: ",
+       paste(head(names(G), 30), collapse=" | "))
+
+names(G)[idx_marker] <- "marker"
+names(G)[idx_chrom]  <- "chrom"
+names(G)[idx_pos]    <- "pos"
+
+geno_samples <- setdiff(names(G), c("marker","chrom","pos"))
+pheno_names  <- as.character(PH_MASTER$NAME)
+
+# exact overlap
+exact_overlap <- intersect(geno_samples, pheno_names)
+
+# "_" -> "-" normalization
+geno_norm <- tibble::tibble(
+  orig = geno_samples,
+  hyph = gsub("_","-", geno_samples, fixed = TRUE)
+)
+hyph_overlap <- intersect(geno_norm$hyph, pheno_names)
+
+cat("[GENO] Exact overlap:", length(exact_overlap),
+    " | Overlap after '_'→'-':", length(hyph_overlap), "\n")
+
+# rename to match phenotype NAMEs
+need_rename <- geno_norm %>%
+  dplyr::filter(hyph %in% pheno_names & orig != hyph) %>%
+  dplyr::filter(!(hyph %in% names(G)))
+
+if (nrow(need_rename) > 0) {
+  if (any(duplicated(need_rename$hyph))) {
+    dups <- unique(need_rename$hyph[duplicated(need_rename$hyph)])
+    message("[GENO] Multiple genotype columns map to same NAME after '_'→'-'. Keeping first for: ",
+            paste(dups, collapse=", "))
+    need_rename <- need_rename %>% dplyr::group_by(hyph) %>% dplyr::slice(1) %>% dplyr::ungroup()
+  }
+  
+  for (i in seq_len(nrow(need_rename))) {
+    data.table::setnames(G, old = need_rename$orig[i], new = need_rename$hyph[i])
+  }
+}
+
+final_samples <- setdiff(names(G), c("marker","chrom","pos"))
+samp_cols     <- intersect(final_samples, pheno_names)
+
+cat("[GENO] Final sample overlap with phenos:", length(samp_cols), "\n")
+
+if (length(samp_cols) < 20) {
+  miss_from_geno  <- setdiff(pheno_names, final_samples)
+  miss_from_pheno <- setdiff(final_samples, pheno_names)
+  message("[GENO] Low overlap; examples (first 20 each):\n  - In PHENO not in GENO: ",
+          paste(head(miss_from_geno, 20), collapse=", "),
+          "\n  - In GENO not in PHENO: ",
+          paste(head(miss_from_pheno, 20), collapse=", "))
+}
+
+keep_cols <- c("marker","chrom","pos", samp_cols)
+G_sub     <- as.data.table(G)[, ..keep_cols]
+
+geno_out <- file.path(out_dir, "geno_numeric_tetra.csv")
+data.table::fwrite(G_sub, geno_out)
+cat("[GENO] Numeric genotype written to:", normalizePath(geno_out), "\n")
+
+# =============================================================
+# 6) Run configuration table for IDs 01–20
+# =============================================================
+run_config <- tibble::tibble(
+  run_id    = 1:20,
+  Cohort    = c(
+    rep("FFPF", 10),  # runs 01–10 (FF/PF with PF covariate)
+    rep("FF",   10)   # runs 11–20 (FF-only, no covariate)
+  ),
+  TraitType = c(
+    "Binary","Binary",
+    "Percent","Percent",
+    "BLUP","BLUP",
+    "BLUE","BLUE",
+    "PCA","PCA",
+    "Binary","Binary",
+    "Percent","Percent",
+    "BLUP","BLUP",
+    "BLUE","BLUE",
+    "PCA","PCA"
+  ),
+  TraitName = c(
+    "BIN_3Jan",
+    "BIN_15Jan",
+    "PERCENT_3Jan",
+    "PERCENT_15Jan",
+    "BLUP_PERCENT_3Jan",
+    "BLUP_PERCENT_15Jan",
+    "BLUE_PERCENT_3Jan",
+    "BLUE_PERCENT_15Jan",
+    "PC1",
+    "PC2",
+    "BIN_3Jan",
+    "BIN_15Jan",
+    "PERCENT_3Jan",
+    "PERCENT_15Jan",
+    "BLUP_PERCENT_3Jan",
+    "BLUP_PERCENT_15Jan",
+    "BLUE_PERCENT_3Jan",
+    "BLUE_PERCENT_15Jan",
+    "PC1",
+    "PC2"
+  ),
+  Covariate = c(
+    rep("PF",   10),  # 01–10 use PF as covariate
+    rep("None", 10)   # 11–20 no covariate
+  )
+)
+
+# =============================================================
+# 7) GWAS runner: single run by ID
+# =============================================================
+get_cohort_df <- function(cohort_label){
+  if (cohort_label == "FFPF") {
+    PH_MASTER
+  } else if (cohort_label == "FF") {
+    PH_MASTER %>% dplyr::filter(PF == 0L)
+  } else {
+    stop("Unknown cohort label: ", cohort_label)
+  }
+}
+
+run_gwas_single <- function(run_id){
+  cfg <- run_config %>% dplyr::filter(run_id == !!run_id)
+  if (nrow(cfg) == 0) {
+    stop("No configuration found for run_id = ", run_id)
+  }
+  
+  cohort_label <- cfg$Cohort[1]
+  trait_name   <- cfg$TraitName[1]
+  cov_mode     <- cfg$Covariate[1]
+  
+  dfC <- get_cohort_df(cohort_label)
+  if (!trait_name %in% names(dfC)) {
+    stop("Trait '", trait_name, "' not found in phenotype data.")
+  }
+  
+  message("\n=== Run ", sprintf("%02d", run_id),
+          " | Cohort=", cohort_label,
+          " | Trait=", trait_name,
+          " | Covariate=", cov_mode, " ===")
+  
+  if (cov_mode == "PF") {
+    df_use <- dfC %>%
+      dplyr::select(NAME, dplyr::all_of(trait_name), PF)
+  } else {
+    df_use <- dfC %>%
+      dplyr::select(NAME, dplyr::all_of(trait_name))
+  }
+  
+  v <- df_use[[trait_name]]
+  if (!any(!is.na(v)) || length(unique(na.omit(v))) <= 1) {
+    message("[SKIP] Trait '", trait_name,
+            "' not informative for run ", sprintf("%02d", run_id), ".")
+    return(invisible(NULL))
+  }
+  
+  pheno_out <- file.path(
+    out_dir,
+    sprintf("pheno_run%02d_%s_%s.csv", run_id, cohort_label, trait_name)
+  )
+  
+  fixed_formula <- NULL
+  if (cov_mode == "PF") {
+    if (!("PF" %in% names(df_use)) ||
+        length(unique(na.omit(df_use$PF))) < 2) {
+      message("[INFO] PF covariate constant/absent in cohort ", cohort_label,
+              "; running WITHOUT PF covariate.")
+      data.table::fwrite(
+        df_use %>% dplyr::select(NAME, dplyr::all_of(trait_name)),
+        pheno_out
+      )
+      fixed_formula <- NULL
+    } else {
+      data.table::fwrite(
+        df_use %>% dplyr::select(NAME, dplyr::all_of(trait_name), PF),
+        pheno_out
+      )
+      fixed_formula <- "PF"
+    }
+  } else {
+    data.table::fwrite(
+      df_use %>% dplyr::select(NAME, dplyr::all_of(trait_name)),
+      pheno_out
+    )
+    fixed_formula <- NULL
+  }
+  
+  # ---- GWASpoly core ----
+  data_gp <- read.GWASpoly(
+    ploidy     = 4,
+    pheno.file = pheno_out,
+    geno.file  = geno_out,
+    format     = "numeric",
+    n.traits   = 1,
+    delim      = ","
+  )
+  
+  data_gp <- set.K(
+    data_gp,
+    LOCO   = TRUE,
+    n.core = max(1, parallel::detectCores() - 1)
+  )
+  
+  N  <- nrow(data_gp@pheno)
+  gf <- 1 - 5/N
+  if (!is.finite(gf) || gf <= 0 || gf >= 1) gf <- 0.95
+  gf <- max(0.01, min(0.99, gf))
+  
+  params <- set.params(
+    geno.freq  = gf,
+    fixed      = if (is.null(fixed_formula)) NULL else fixed_formula,
+    fixed.type = if (is.null(fixed_formula)) NULL else "factor"
+  )
+  
+  models_use <- c("additive","1-dom","general")
+  
+  fit <- GWASpoly(
+    data   = data_gp,
+    models = models_use,
+    traits = trait_name,
+    params = params,
+    n.core = max(1, parallel::detectCores() - 1),
+    quiet  = TRUE
+  )
+  
+  fit_thr <- set.threshold(fit, method = "M.eff", level = 0.05)
+  
+  # ---- Save tables ----
+  base <- file.path(
+    out_dir,
+    sprintf("GWAS_run%02d_%s_%s_%s", run_id, cohort_label, cov_mode, trait_name)
+  )
+  
+  write.GWASpoly(
+    fit_thr,
+    trait    = trait_name,
+    filename = paste0(base, "_scores.csv"),
+    what     = "scores"
+  )
+  qtl <- get.QTL(
+    fit_thr,
+    traits    = trait_name,
+    models    = "additive",
+    bp.window = 5e6
+  )
+  data.table::fwrite(qtl, paste0(base, "_QTL.csv"))
+  
+  # ---- Manhattan plot -> PNG ----
+  title_txt <- paste0(
+    "Run ", sprintf("%02d", run_id),
+    " — Cohort: ", cohort_label,
+    " | Trait: ", trait_name,
+    " | Covariate: ", cov_mode
+  )
+  
+  p <- try(manhattan.plot(fit_thr, traits = trait_name), silent = TRUE)
+  if (inherits(p, "try-error") || !inherits(p, "ggplot")) {
+    message("[WARN] manhattan.plot() did not return a ggplot for trait ", trait_name,
+            "; PNG not saved.")
+  } else {
+    p <- p + ggplot2::ggtitle(title_txt)
+    png_name <- sprintf("%02d) %s.png", run_id, trait_name)
+    outfile  <- file.path(mp_outdir, png_name)
+    save_png_hq(p, outfile)
+    message("[SAVED] Manhattan PNG: ", outfile)
+  }
+  
+  invisible(TRUE)
+}
+
+# =============================================================
+# 8) STATIC RUN MENU — click + Ctrl+Enter to run a GWAS
+# =============================================================
+
+# ---- FF/PF (mixed; PF covariate) ----
+# 01
+run_gwas_single(1)   # Run 01: Cohort = FF/PF, Binary,  BIN_3Jan,          Covariate = PF
+# 02
+run_gwas_single(2)   # Run 02: Cohort = FF/PF, Binary,  BIN_15Jan,         Covariate = PF
+# 03
+run_gwas_single(3)   # Run 03: Cohort = FF/PF, Percent, PERCENT_3Jan,      Covariate = PF
+# 04
+run_gwas_single(4)   # Run 04: Cohort = FF/PF, Percent, PERCENT_15Jan,     Covariate = PF
+# 05
+run_gwas_single(5)   # Run 05: Cohort = FF/PF, BLUP,    BLUP_PERCENT_3Jan, Covariate = PF
+# 06
+run_gwas_single(6)   # Run 06: Cohort = FF/PF, BLUP,    BLUP_PERCENT_15Jan,Covariate = PF
+# 07
+run_gwas_single(7)   # Run 07: Cohort = FF/PF, BLUE,    BLUE_PERCENT_3Jan, Covariate = PF
+# 08
+run_gwas_single(8)   # Run 08: Cohort = FF/PF, BLUE,    BLUE_PERCENT_15Jan,Covariate = PF
+# 09
+run_gwas_single(9)   # Run 09: Cohort = FF/PF, PCA,     PC1,               Covariate = PF
+# 10
+run_gwas_single(10)  # Run 10: Cohort = FF/PF, PCA,     PC2,               Covariate = PF
+
+# ---- FF-only (no covariate) ----
+# 11
+run_gwas_single(11)  # Run 11: Cohort = FF, Binary,  BIN_3Jan,          Covariate = None
+# 12
+run_gwas_single(12)  # Run 12: Cohort = FF, Binary,  BIN_15Jan,         Covariate = None
+# 13
+run_gwas_single(13)  # Run 13: Cohort = FF, Percent, PERCENT_3Jan,      Covariate = None
+# 14
+run_gwas_single(14)  # Run 14: Cohort = FF, Percent, PERCENT_15Jan,     Covariate = None
+# 15
+run_gwas_single(15)  # Run 15: Cohort = FF, BLUP,    BLUP_PERCENT_3Jan, Covariate = None
+# 16
+run_gwas_single(16)  # Run 16: Cohort = FF, BLUP,    BLUP_PERCENT_15Jan,Covariate = None
+# 17
+run_gwas_single(17)  # Run 17: Cohort = FF, BLUE,    BLUE_PERCENT_3Jan, Covariate = None
+# 18
+run_gwas_single(18)  # Run 18: Cohort = FF, BLUE,    BLUE_PERCENT_15Jan,Covariate = None
+# 19
+run_gwas_single(19)  # Run 19: Cohort = FF, PCA,     PC1,               Covariate = None
+# 20
+run_gwas_single(20)  # Run 20: Cohort = FF, PCA,     PC2,               Covariate = None
