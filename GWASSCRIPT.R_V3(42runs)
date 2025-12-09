@@ -1,0 +1,448 @@
+# =============================================================
+# Blackberry budbreak GWAS (tetraploid) — FINAL MASTER PIPELINE
+#  - Duplicate-column safe
+#  - Binary + Fractional + Percent + Composite traits
+#  - SAFE BLUP / BLUE with auto-fallback
+#  - 3 GWAS Blocks:
+#       A) FFPF with PF covariate
+#       B) FFPF without PF covariate (PF locus test)
+#       C) FF-only without PF covariate
+#  - 42 manual GWAS runs
+#  - Manhattan plots saved with run numbers
+# =============================================================
+
+rm(list = ls())
+options(stringsAsFactors = FALSE)
+
+# =============================================================
+# ---- Packages ----
+# =============================================================
+pkgs <- c("tidyverse","data.table","GWASpoly","stringr",
+          "lme4","lmerTest","emmeans","parallel")
+to_install <- pkgs[!pkgs %in% installed.packages()[,"Package"]]
+if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+# =============================================================
+# ---- Paths ----
+# =============================================================
+pheno_file <- "C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets/GWAS_Data_Budbreak.csv"
+geno_file  <- "C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets/captureseq2025_GATK_postmean_70K_updog_filtered.csv"
+
+out_dir <- "gwaspoly_runsets"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+mp_outdir <- "C:/Users/RhysB/OneDrive/Desktop/GWASCHILL_OUTPUTS"
+if (!dir.exists(mp_outdir)) dir.create(mp_outdir, recursive = TRUE)
+
+cat("\n[PATH] PHENO:", pheno_file,
+    "\n[PATH] GENO :", geno_file,
+    "\n[OUT]  Tables:", normalizePath(out_dir, mustWork = FALSE),
+    "\n[OUT]  PNGs  :", normalizePath(mp_outdir, mustWork = FALSE), "\n")
+
+# =============================================================
+# 0) Helpers
+# =============================================================
+.read_csv <- function(path){
+  data.table::fread(path, data.table = FALSE, na.strings = c("", "NA"))
+}
+get_name <- function(x) sub("(_.*)$", "", x)
+.clamp_counts <- function(v, maxv){
+  v <- suppressWarnings(as.numeric(v))
+  v <- pmax(0, v)
+  v <- pmin(v, maxv)
+  v
+}
+save_png_hq <- function(plot, filename, width=12, height=8, dpi=600){
+  ggsave(filename, plot, width=width, height=height,
+         dpi=dpi, units="in", type="cairo-png")
+}
+
+# =============================================================
+# 1) Load & Build Phenotypes (SAFE for duplicate headers)
+# =============================================================
+ph_raw <- .read_csv(pheno_file)
+names(ph_raw) <- make.unique(names(ph_raw))   # ✅ Critical Excel fix
+
+ph <- ph_raw %>%
+  mutate(
+    NAME = get_name(`Lug Order`),
+    
+    TBUDS_200 = `Total Buds.1`,
+    TBUDS_263 = `Total Buds`,
+    
+    CNT_200_3Jan  = .clamp_counts(`3-Jan`,  TBUDS_200),
+    CNT_263_15Jan = .clamp_counts(`15-Jan`, TBUDS_263),
+    
+    PERCENT_3Jan  = 100 * CNT_200_3Jan / TBUDS_200,
+    PERCENT_15Jan = 100 * CNT_263_15Jan / TBUDS_263,
+    
+    FRAC_3Jan  = CNT_200_3Jan  / TBUDS_200,
+    FRAC_15Jan = CNT_263_15Jan / TBUDS_263,
+    
+    BIN_3Jan  = as.integer(CNT_200_3Jan  > 0),
+    BIN_15Jan = as.integer(CNT_263_15Jan > 0)
+  )
+
+# =============================================================
+# 2) PF / FF Assignment
+# =============================================================
+PF_tbl <- tibble(NAME = unique(ph$NAME)) %>%
+  mutate(
+    PF = case_when(
+      startsWith(NAME, "APF") ~ 1L,
+      startsWith(NAME, "A-")  ~ 0L,
+      TRUE ~ NA_integer_
+    )
+  )
+
+# =============================================================
+# 3) SAFE BLUPs & BLUEs (AUTO-FALLBACK)
+# =============================================================
+mk_blup_blue <- function(df, trait){
+  
+  message("[BLUP/BLUE] Processing: ", trait)
+  
+  df <- df %>%
+    filter(!is.na(.data[[trait]]), is.finite(.data[[trait]]))
+  
+  if (nrow(df) < 10 || n_distinct(df$NAME) < 3) {
+    message("[SKIP] Not enough data for ", trait)
+    fallback <- df %>%
+      group_by(NAME) %>%
+      summarise(
+        !!paste0("BLUE_",trait) := mean(.data[[trait]], na.rm=TRUE),
+        !!paste0("BLUP_",trait) := mean(.data[[trait]], na.rm=TRUE),
+        .groups="drop"
+      )
+    return(list(
+      BLUP = fallback %>% select(NAME, paste0("BLUP_",trait)),
+      BLUE = fallback %>% select(NAME, paste0("BLUE_",trait))
+    ))
+  }
+  
+  df$NAME <- factor(df$NAME)
+  df$Lug  <- factor(df$`Lug Order`)
+  
+  # ---- BLUP ----
+  blups_tbl <- try({
+    m1 <- lmer(
+      as.formula(paste0(trait," ~ Lug + (1|NAME)")),
+      df, REML=TRUE,
+      control = lmerControl(optimizer="bobyqa",
+                            optCtrl=list(maxfun=1e5))
+    )
+    re <- ranef(m1)$NAME
+    tibble(NAME=rownames(re),
+           !!paste0("BLUP_",trait) := as.numeric(re[,"(Intercept)"]))
+  }, silent=TRUE)
+  
+  if (inherits(blups_tbl,"try-error")) {
+    message("[BLUP FAIL] Using genotype means for ", trait)
+    blups_tbl <- df %>% group_by(NAME) %>%
+      summarise(!!paste0("BLUP_",trait) := mean(.data[[trait]], na.rm=TRUE),
+                .groups="drop")
+  }
+  
+  # ---- BLUE ----
+  blues_tbl <- try({
+    m2 <- lm(as.formula(paste0(trait," ~ Lug + NAME")), df)
+    co <- coef(m2)
+    val <- co[grepl("^NAME", names(co))]
+    tibble(NAME=gsub("^NAME","",names(val)),
+           !!paste0("BLUE_",trait) := as.numeric(val))
+  }, silent=TRUE)
+  
+  if (inherits(blues_tbl,"try-error")) {
+    message("[BLUE FAIL] Using genotype means for ", trait)
+    blues_tbl <- df %>% group_by(NAME) %>%
+      summarise(!!paste0("BLUE_",trait) := mean(.data[[trait]], na.rm=TRUE),
+                .groups="drop")
+  }
+  
+  list(BLUP=blups_tbl, BLUE=blues_tbl)
+}
+
+bb3  <- mk_blup_blue(ph, "PERCENT_3Jan")
+bb15 <- mk_blup_blue(ph, "PERCENT_15Jan")
+
+# =============================================================
+# 4) Composite Traits
+# =============================================================
+COMP_tbl <- ph %>%
+  group_by(NAME) %>%
+  summarise(
+    COMP_PERCENT = mean(c(PERCENT_3Jan,PERCENT_15Jan), na.rm=TRUE),
+    COMP_FRAC    = mean(c(FRAC_3Jan,FRAC_15Jan), na.rm=TRUE),
+    .groups="drop"
+  )
+
+# =============================================================
+# 5) Master Phenotype Table
+# =============================================================
+PH_MASTER <- ph %>%
+  group_by(NAME) %>%
+  summarise(across(
+    c(BIN_3Jan,BIN_15Jan,
+      FRAC_3Jan,FRAC_15Jan,
+      PERCENT_3Jan,PERCENT_15Jan),
+    mean, na.rm=TRUE
+  ), .groups="drop") %>%
+  left_join(bb3$BLUP,  by="NAME") %>%
+  left_join(bb15$BLUP, by="NAME") %>%
+  left_join(bb3$BLUE,  by="NAME") %>%
+  left_join(bb15$BLUE, by="NAME") %>%
+  left_join(COMP_tbl, by="NAME") %>%
+  left_join(PF_tbl,   by="NAME")
+
+# =============================================================
+# 6) Genotype Harmonization (robust)
+# =============================================================
+G <- fread(geno_file)
+names(G)[1:3] <- c("marker","chrom","pos")
+
+geno_samples <- setdiff(names(G), c("marker","chrom","pos"))
+pheno_names  <- unique(PH_MASTER$NAME)
+
+# Build a mapping table for genotype sample IDs
+map <- tibble(
+  orig = geno_samples
+) %>%
+  mutate(
+    trim = stringr::str_trim(orig),
+    hyph = gsub("_", "-", trim, fixed = TRUE),
+    hyph = gsub("\\s+", "", hyph),          # remove internal spaces
+    upper = toupper(hyph)
+  )
+
+pheno_tbl <- tibble(
+  NAME = pheno_names
+) %>%
+  mutate(
+    NAME_trim  = stringr::str_trim(NAME),
+    NAME_nospace = gsub("\\s+", "", NAME_trim),
+    NAME_upper = toupper(NAME_nospace)
+  )
+
+# Try to match on uppercase no-space versions
+join_map <- map %>%
+  inner_join(pheno_tbl, by = c("upper" = "NAME_upper"))
+
+cat("\n[GENO-HARM] PHENO N =", length(pheno_names),
+    " | GENO N =", length(geno_samples),
+    " | OVERLAP via mapping =", nrow(join_map), "\n")
+
+# If nothing matches, bail out with a clear error
+if (nrow(join_map) < 20) {
+  cat("\n[GENO-HARM] Example PHENO-only names:\n")
+  print(head(setdiff(pheno_names, geno_samples), 20))
+  cat("\n[GENO-HARM] Example GENO-only names:\n")
+  print(head(setdiff(geno_samples, pheno_names), 20))
+  stop("🚨 FATAL: Fewer than 20 overlapping samples after name harmonization.\nCheck genotype vs phenotype IDs.")
+}
+
+# Rename genotype columns so they EXACTLY match PH_MASTER$NAME
+# i.e., from orig → NAME_trim (or NAME)
+rename_pairs <- join_map %>%
+  distinct(orig, NAME_trim)
+
+for (i in seq_len(nrow(rename_pairs))) {
+  data.table::setnames(
+    G,
+    old = rename_pairs$orig[i],
+    new = rename_pairs$NAME_trim[i]
+  )
+}
+
+# Recompute overlap after renaming
+final_samples <- intersect(
+  setdiff(names(G), c("marker","chrom","pos")),
+  pheno_names
+)
+
+cat("[GENO-HARM] Final overlapping samples:", length(final_samples), "\n")
+
+if (length(final_samples) < 20) {
+  stop("🚨 Still too few overlapping samples (", length(final_samples),
+       "). Check name patterns manually.")
+}
+
+# Keep only marker/chrom/pos + overlapping samples
+keep_cols <- c("marker","chrom","pos", final_samples)
+G_sub     <- G[, ..keep_cols]
+
+geno_out <- file.path(out_dir,"geno_numeric_tetra.csv")
+fwrite(G_sub, geno_out)
+cat("[GENO-HARM] Wrote numeric genotype for ", length(final_samples),
+    " individuals to:\n  ", normalizePath(geno_out, mustWork = FALSE), "\n")
+
+
+# =============================================================
+# 7) GWAS Run Configuration — 42 Runs
+# =============================================================
+run_config <- tibble(
+  run_id = 1:42,
+  
+  Cohort = c(
+    rep("FFPF", 14),   # 01–14  FFPF with PF cov
+    rep("FFPF", 14),   # 15–28  FFPF without PF cov ✅
+    rep("FF",   14)    # 29–42  FF only
+  ),
+  
+  Trait = rep(c(
+    "BIN_3Jan","BIN_15Jan",
+    "FRAC_3Jan","FRAC_15Jan",
+    "PERCENT_3Jan","PERCENT_15Jan",
+    "BLUP_PERCENT_3Jan","BLUP_PERCENT_15Jan",
+    "BLUE_PERCENT_3Jan","BLUE_PERCENT_15Jan",
+    "COMP_PERCENT","COMP_FRAC",
+    "PC1","PC2"
+  ), 3),
+  
+  Covariate = c(
+    rep("PF",   14),   # Block A
+    rep("None", 14),   # Block B
+    rep("None", 14)    # Block C
+  )
+)
+
+get_cohort_df <- function(x){
+  if (x=="FFPF") return(PH_MASTER)
+  PH_MASTER %>% filter(PF==0)
+}
+
+# =============================================================
+# 8) Single-Run GWAS Function
+# =============================================================
+run_gwas_single <- function(run_id){
+  
+  cfg   <- run_config %>% filter(run_id==!!run_id)
+  df    <- get_cohort_df(cfg$Cohort)
+  trait <- cfg$Trait
+  cov   <- cfg$Covariate
+  
+  if (!trait %in% names(df)) {
+    message("[SKIP] Missing trait: ", trait)
+    return(invisible(NULL))
+  }
+  
+  df_use <- if (cov=="PF") {
+    df %>% select(NAME, all_of(trait), PF)
+  } else {
+    df %>% select(NAME, all_of(trait))
+  }
+  
+  pheno_out <- file.path(out_dir, paste0("pheno_run",run_id,".csv"))
+  fwrite(df_use, pheno_out)
+  
+  data_gp <- read.GWASpoly(
+  ploidy     = 4,
+  pheno.file = pheno_out,
+  geno.file  = geno_out,
+  format     = "numeric",
+  n.traits   = 1       # ✅ REQUIRED FIX
+)
+
+  
+  data_gp <- set.K(data_gp, LOCO=TRUE)
+  
+  params <- if (cov=="PF") {
+    set.params(fixed="PF", fixed.type="factor")
+  } else {
+    set.params()
+  }
+  
+  fit <- GWASpoly(
+    data=data_gp,
+    traits=trait,
+    models=c("additive","1-dom","2-dom","general"),
+    params=params,
+    n.core=max(1,detectCores()-1)
+  )
+  
+  thr <- set.threshold(fit, method="M.eff", level=0.05)
+  
+  base <- file.path(
+    out_dir,
+    paste0("GWAS_run",run_id,"_",cfg$Cohort,"_",trait)
+  )
+  
+  write.GWASpoly(
+    thr,
+    trait=trait,
+    filename=paste0(base,"_scores.csv"),
+    what="scores"
+  )
+  
+  qtl <- get.QTL(
+    thr,
+    traits=trait,
+    models="additive",
+    bp.window=5e6
+  )
+  
+  fwrite(qtl, paste0(base,"_QTL.csv"))
+  
+  p <- manhattan.plot(thr, traits=trait)
+  save_png_hq(p, file.path(mp_outdir, paste0(run_id,"_",trait,".png")))
+}
+
+# =============================================================
+# 9) RUN MENU — Ctrl + Enter Any Line
+# =============================================================
+if (FALSE) {
+  
+  # =========================================================
+  # A) FFPF WITH PF COVARIATE — Runs 1–14
+  # =========================================================
+  run_gwas_single(1)
+  run_gwas_single(2)
+  run_gwas_single(3)
+  run_gwas_single(4)
+  run_gwas_single(5)
+  run_gwas_single(6)
+  run_gwas_single(7)
+  run_gwas_single(8)
+  run_gwas_single(9)
+  run_gwas_single(10)
+  run_gwas_single(11)
+  run_gwas_single(12)
+  run_gwas_single(13)
+  run_gwas_single(14)
+  
+  # =========================================================
+  # B) FFPF WITHOUT PF COVARIATE (PF LOCUS TEST) — Runs 15–28
+  # =========================================================
+  run_gwas_single(15)
+  run_gwas_single(16)
+  run_gwas_single(17)
+  run_gwas_single(18)
+  run_gwas_single(19)
+  run_gwas_single(20)
+  run_gwas_single(21)
+  run_gwas_single(22)
+  run_gwas_single(23)
+  run_gwas_single(24)
+  run_gwas_single(25)
+  run_gwas_single(26)
+  run_gwas_single(27)
+  run_gwas_single(28)
+  
+  # =========================================================
+  # C) FF-ONLY (NO PF ANYWHERE) — Runs 29–42
+  # =========================================================
+  run_gwas_single(29)
+  run_gwas_single(30)
+  run_gwas_single(31)
+  run_gwas_single(32)
+  run_gwas_single(33)
+  run_gwas_single(34)
+  run_gwas_single(35)
+  run_gwas_single(36)
+  run_gwas_single(37)
+  run_gwas_single(38)
+  run_gwas_single(39)
+  run_gwas_single(40)
+  run_gwas_single(41)
+  run_gwas_single(42)
+}
