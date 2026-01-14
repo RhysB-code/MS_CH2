@@ -1,0 +1,106 @@
+# ================================================================
+# PF (APF-) vs FF histogram — GWASCollection1_2025.csv
+#  - Uses your REAL columns: "Tag Label", "...2", "Buds Broken 12/15"
+#  - Genotype = Tag Label for checks (Osage/Ouachita), else genotype = ...2
+#  - PF if Genotype starts with "APF-", else FF
+#  - Integer bins: 0–1, 1–2, ...
+# ================================================================
+
+rm(list = ls())
+
+packages <- c("readr","dplyr","stringr","ggplot2")
+to_install <- packages[!packages %in% installed.packages()[,"Package"]]
+if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+invisible(lapply(packages, library, character.only = TRUE))
+
+# ---- Working directory (FOLDER, not file) ----
+setwd("C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets")
+
+# ---- Read ----
+raw <- readr::read_csv("GWASCollection1_2025.csv", show_col_types = FALSE)
+
+# ---- Build genotype + PF/FF + budbreak ----
+dat <- raw %>%
+  mutate(
+    TagLabel = str_trim(`Tag Label`),
+    # genotype ID column is literally named "...2"
+    Genotype = if_else(
+      !is.na(TagLabel) & TagLabel != "" & TagLabel %in% c("Osage","Ouachita"),
+      TagLabel,
+      str_trim(as.character(`...2`))
+    ),
+    BudsBroken = suppressWarnings(as.numeric(`Buds Broken 12/15`)),
+    Material = if_else(str_detect(Genotype, "^APF-"), "PF", "FF")
+  ) %>%
+  filter(!is.na(Genotype), Genotype != "", !is.na(BudsBroken))
+
+# ---- Rep-aware genotype summaries (if genotype repeats, take mean) ----
+geno <- dat %>%
+  group_by(Genotype, Material) %>%
+  summarise(
+    n_plants = n(),
+    budsbroken_mean = mean(BudsBroken, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---- Shared integer bins across PF+FF ----
+xmax <- max(1, ceiling(max(geno$budsbroken_mean, na.rm = TRUE)))
+breaks <- 0:xmax
+
+# ---- Histogram: PF blue, FF red (same bins) ----
+p <- ggplot(geno, aes(x = budsbroken_mean, fill = Material)) +
+  geom_histogram(
+    breaks = breaks,
+    color  = "black",
+    alpha  = 0.55,
+    position = "identity"
+  ) +
+  scale_fill_manual(values = c("PF" = "blue", "FF" = "red")) +
+  scale_x_continuous(breaks = 0:xmax, limits = c(0, xmax)) +
+  labs(
+    title = "Budbreak per Genotype (mean) — PF vs FF",
+    x = "Mean buds broken per genotype",
+    y = "Count of genotypes",
+    fill = "Material"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+print(p)
+
+# ---- Optional exports ----
+write.csv(geno, "BudbreakMeans_byGenotype_PFvsFF_2025.csv", row.names = FALSE)
+
+make_intbin_csv_pf_ff <- function(df, value_col, file_name){
+  v <- df[[value_col]]
+  xmax <- max(1, ceiling(max(v, na.rm = TRUE)))
+  breaks <- 0:xmax
+  lefts  <- 0:(xmax - 1)
+  rights <- 1:xmax
+  labels <- sprintf("%d_to_%d", lefts, rights)
+  
+  out <- df %>%
+    mutate(
+      Range = cut(.data[[value_col]],
+                  breaks = breaks,
+                  right = FALSE,
+                  include.lowest = TRUE,
+                  labels = labels)
+    ) %>%
+    group_by(Material, Range) %>%
+    summarise(
+      Genotypes = paste(sort(Genotype), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    mutate(LeftEdge = as.numeric(gsub("^\\D*(\\d+).*", "\\1", Range))) %>%
+    arrange(Material, LeftEdge) %>%
+    select(Material, Range, Genotypes)
+  
+  write.csv(out, file_name, row.names = FALSE, quote = TRUE)
+  message("Wrote CSV: ", normalizePath(file_name))
+}
+
+make_intbin_csv_pf_ff(geno, "budsbroken_mean", "Budbreak_GenotypeBins_PFvsFF_integer_2025.csv")
