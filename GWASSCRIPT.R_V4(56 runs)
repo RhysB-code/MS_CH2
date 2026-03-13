@@ -1,0 +1,1202 @@
+---
+title: "Blackberry Budbreak GWAS — Tetraploid Pipeline"
+author: "Rhys B."
+date: 3/13/2026
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    self-contained: true
+    theme: cosmo
+    fig-width: 12
+    fig-height: 7
+execute:
+  warning: false
+  message: false
+  cache: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+This document runs a 56-run tetraploid GWAS pipeline on blackberry budbreak phenotypes
+using `GWASpoly`. Manhattan plots below each run are loaded from pre-saved PNGs —
+re-rendering this document does **not** re-run the GWAS analyses unless you explicitly
+uncomment lines in the OPTIONAL block.
+
+**Four GWAS blocks:**
+
+| Block | Cohort      | Covariate              | Runs  |
+|-------|-------------|------------------------|-------|
+| A     | FFPF (all)  | PF status              | 1–14  |
+| B     | FFPF (all)  | None (PF locus test)   | 15–28 |
+| C     | FF only     | None                   | 29–42 |
+| D     | PF only     | None                   | 43–56 |
+
+**Traits per block (14 each):**
+BIN_3Jan, BIN_15Jan, FRAC_3Jan, FRAC_15Jan, PERCENT_3Jan, PERCENT_15Jan,
+BLUP_PERCENT_3Jan, BLUP_PERCENT_15Jan, BLUE_PERCENT_3Jan, BLUE_PERCENT_15Jan,
+COMP_PERCENT, COMP_FRAC, PC1, PC2
+
+## Biological Background
+
+Blackberry budbreak timing is a quantitative trait governed by chilling hour accumulation over winter. Plants that have not received sufficient chilling remain dormant; those that have met their chilling requirement begin to break bud. In this experiment, canes were removed from field storage at two different chilling levels — approximately 200 chill hours (assessed 3-Jan) and approximately 263 chill hours (assessed 15-Jan) — and placed in a forcing environment. The proportion of buds that broke is the primary phenotype.
+
+Primocane-fruiting (PF) genotypes carry a dominant allele at a single major locus that enables fruiting on first-year canes. This PF locus is known to be associated with budbreak phenotypes, so we must explicitly account for it — either statistically (as a covariate in Block A) or by cohort restriction (Blocks C and D) — to distinguish budbreak QTL that are independent of PF from those that are pleiotropic with it.
+
+---
+
+# Setup
+
+## Packages
+
+The core packages used are: `tidyverse` for data manipulation and plotting, `data.table` for fast file I/O of the large genotype matrix, `GWASpoly` for the tetraploid-aware GWAS engine, `lme4` / `lmerTest` for the mixed-model BLUP step, `emmeans` for estimated marginal means used in BLUE extraction, and `parallel` for multi-core GWAS computation.
+
+```{r packages}
+pkgs <- c("tidyverse", "data.table", "GWASpoly", "stringr",
+          "lme4", "lmerTest", "emmeans", "parallel")
+to_install <- pkgs[!pkgs %in% installed.packages()[, "Package"]]
+if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+invisible(lapply(pkgs, library, character.only = TRUE))
+```
+
+## Paths
+
+All file paths are defined once here so they never need to be changed elsewhere in the script. `out_dir` holds intermediate per-run phenotype CSVs and GWASpoly score/QTL output tables. `mp_outdir` holds the final Manhattan plot PNGs that are displayed in the Results section below.
+
+```{r paths}
+pheno_file <- "C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets/GWAS_Data_Budbreak.csv"
+geno_file  <- "C:/Users/RhysB/OneDrive/Desktop/Chill Spreadsheets/captureseq2025_GATK_postmean_70K_updog_filtered.csv"
+
+out_dir   <- "gwaspoly_runsets"
+mp_outdir <- "C:/Users/RhysB/OneDrive/Desktop/GWASCHILL_OUTPUTS"
+
+dir.create(out_dir,   showWarnings = FALSE, recursive = TRUE)
+dir.create(mp_outdir, showWarnings = FALSE, recursive = TRUE)
+
+cat("[PATH] PHENO  :", pheno_file,
+    "\n[PATH] GENO   :", geno_file,
+    "\n[OUT]  Tables :", normalizePath(out_dir,   mustWork = FALSE),
+    "\n[OUT]  PNGs   :", normalizePath(mp_outdir, mustWork = FALSE), "\n")
+```
+
+---
+
+# Helpers
+
+Small utility functions used throughout the pipeline. Defined once here to avoid repetition.
+
+**`get_name()`** — Each plant in this trial is identified by a lug ID string that encodes multiple pieces of information. For example, `APF-665T_3_19_B_1` decodes as: genotype `APF-665T`, field row `3`, field position `19`, spatial block `B`, replicate number `1`. To group observations by genotype, we need to strip the replicate suffix (`_1`) while keeping everything else. We strip only the final `_digit` group from the end of the string. If we stripped from the first underscore (the original approach), we would collapse `APF-665T_3_19_B_1` all the way to `APF-665T` — losing the row/position/block information needed for the spatial model — and we would also destroy genotype names that happen to contain underscores.
+
+**`.clamp_counts()`** — Converts budbreak count columns to numeric and enforces the constraint that a count must be between 0 and the total number of buds assessed. This guards against data entry errors like a count exceeding the bud total.
+
+**`save_png_hq()`** — Writes Manhattan plots at 600 DPI using Cairo rendering, which produces clean anti-aliased text and lines suitable for publication.
+
+```{r helpers}
+.read_csv <- function(path) {
+  data.table::fread(path, data.table = FALSE, na.strings = c("", "NA"))
+}
+
+# Strips only the final _digit replicate suffix from a lug ID string.
+# Example: APF-665T_3_19_B_1  →  APF-665T_3_19_B  (unique plant, multiple obs possible)
+# This is intentionally NOT sub("_.*$", "", x), which would collapse too aggressively.
+get_name <- function(x) sub("_\\d+$", "", x)
+
+.clamp_counts <- function(v, maxv) {
+  v <- suppressWarnings(as.numeric(v))
+  v <- pmax(0, v, na.rm = FALSE)
+  v <- pmin(v, maxv)
+  v
+}
+
+save_png_hq <- function(plot, filename, width = 12, height = 8, dpi = 600) {
+  ggplot2::ggsave(filename, plot,
+                  width = width, height = height,
+                  dpi = dpi, units = "in", type = "cairo-png")
+}
+```
+
+---
+
+# Phenotype Construction
+
+## Load & Reshape CSV
+
+The source phenotype file has an unusual structure: two completely separate experiments are laid out side-by-side in the same Excel sheet, separated by a blank column. The **left block** (columns 1–10) contains plants assessed at approximately 263 chill hours, with the primary observation date of 15-Jan. The **right block** (columns 12–21) contains a different set of plants assessed at approximately 200 chill hours, with the primary observation date of 3-Jan. The genotype in column 1 and the genotype in column 12 on any given row are **different plants** — they share a row purely because of Excel layout, not because of any biological relationship.
+
+When `data.table::fread()` reads this file, it sees one flat 21-column table. The duplicate column names (`Lug Order`, `Total Buds`) are disambiguated by `make.unique()`, which appends `.1` to the second occurrence of each — so the right-side lug order becomes `Lug Order.1` and the right-side bud total becomes `Total Buds.1`. We then parse the left and right halves as completely separate data frames before computing any derived traits, so each phenotypic measurement is always associated with the correct genotype.
+
+We also extract the **spatial block letter** (A, B, C, or D) from each lug ID at this stage using a regex lookahead. This letter identifies which physical block of the trial a plant was grown in — an important environmental covariate for the mixed models later. The regex `[A-Da-d](?=_\\d+$)` finds a block letter that is immediately followed by `_` and then the replicate digit at the end of the string, which uniquely identifies it among the other parts of the lug ID.
+
+Finally, any row where `Total Buds` is zero or missing is removed before computing fractions. Division by zero would produce silent `NaN` values that would propagate invisibly through all downstream steps.
+
+```{r load-reshape}
+ph_raw <- .read_csv(pheno_file)
+names(ph_raw) <- make.unique(names(ph_raw))  # disambiguates duplicate Excel headers
+
+# ── Left block: ~263 chill hours, assessed 15-Jan ──────────────────────────
+# Raw columns used: Lug Order (col 1), Total Buds (col 4), 15-Jan (col 6)
+left_block <- ph_raw %>%
+  select(
+    LugOrder  = `Lug Order`,
+    TotalBuds = `Total Buds`,
+    Cnt_15Jan = `15-Jan`
+  ) %>%
+  filter(!is.na(LugOrder), LugOrder != "") %>%
+  mutate(
+    NAME      = get_name(LugOrder),
+    # Spatial block letter extracted from lug ID for use in mixed models.
+    # e.g. APF-665T_3_19_B_1 → Block = "B"
+    Block     = stringr::str_extract(LugOrder, "[A-Da-d](?=_\\d+$)"),
+    TotalBuds = suppressWarnings(as.numeric(TotalBuds)),
+    Cnt_15Jan = .clamp_counts(Cnt_15Jan, TotalBuds)
+  ) %>%
+  # Remove rows with zero or missing Total Buds to prevent NaN in derived traits
+  filter(!is.na(TotalBuds), TotalBuds > 0) %>%
+  mutate(
+    PERCENT_15Jan = 100 * Cnt_15Jan / TotalBuds,   # 0–100 scale
+    FRAC_15Jan    = Cnt_15Jan / TotalBuds,          # 0–1 scale
+    BIN_15Jan     = as.integer(Cnt_15Jan > 0)       # 1 = any budbreak, 0 = none
+  )
+
+# ── Right block: ~200 chill hours, assessed 3-Jan ──────────────────────────
+# make.unique renamed duplicated headers: "Lug Order.1" and "Total Buds.1"
+right_block <- ph_raw %>%
+  select(
+    LugOrder  = `Lug Order.1`,
+    TotalBuds = `Total Buds.1`,
+    Cnt_3Jan  = `3-Jan`
+  ) %>%
+  filter(!is.na(LugOrder), LugOrder != "") %>%
+  mutate(
+    NAME      = get_name(LugOrder),
+    Block     = stringr::str_extract(LugOrder, "[A-Da-d](?=_\\d+$)"),
+    TotalBuds = suppressWarnings(as.numeric(TotalBuds)),
+    Cnt_3Jan  = .clamp_counts(Cnt_3Jan, TotalBuds)
+  ) %>%
+  filter(!is.na(TotalBuds), TotalBuds > 0) %>%
+  mutate(
+    PERCENT_3Jan = 100 * Cnt_3Jan / TotalBuds,
+    FRAC_3Jan    = Cnt_3Jan / TotalBuds,
+    BIN_3Jan     = as.integer(Cnt_3Jan > 0)
+  )
+
+cat("[RESHAPE] Left block rows :", nrow(left_block),
+    "| Unique genotypes:", n_distinct(left_block$NAME), "\n")
+cat("[RESHAPE] Right block rows:", nrow(right_block),
+    "| Unique genotypes:", n_distinct(right_block$NAME), "\n")
+```
+
+## PF Assignment
+
+Every genotype in the trial needs a PF status flag (1 = primocane-fruiting, 0 = floricane-fruiting) for two reasons. First, it is used as a **fixed-effect covariate** in Block A runs to statistically remove the variance attributable to the PF locus before testing all other markers. Second, it is used as a **cohort filter** in Blocks C and D: Block C restricts to PF=0 (FF-only), and Block D restricts to PF=1 (PF-only), removing any cross-background confounding entirely rather than relying on statistical control.
+
+The naming convention in this population makes PF assignment straightforward for breeding lines: any genotype whose name starts with `APF` is a primocane-fruiting advanced line, and any genotype starting with `A-` is a floricane-fruiting advanced line. Named commercial varieties are assigned individually based on their known biology. Any genotype that falls through all conditions gets `PF = NA` and is flagged in the console — those individuals will be excluded from cohort-filtered runs (C and D) and will have their PF covariate missing in Block A runs. If any NA names appear, they should be added to the `case_when` block above before proceeding.
+
+```{r pf-assignment}
+all_names <- union(unique(left_block$NAME), unique(right_block$NAME))
+
+PF_tbl <- tibble(NAME = all_names) %>%
+  mutate(
+    PF = case_when(
+      # Breeding line prefixes — reliable naming convention
+      startsWith(NAME, "APF")   ~ 1L,   # primocane-fruiting advanced lines
+      startsWith(NAME, "A-")    ~ 0L,   # floricane-fruiting advanced lines
+      # Named commercial varieties — assigned by known biology
+      NAME %in% c(
+        "PrimeArkFreedom",
+        "PrimeArkHorizon",
+        "Superlicious"
+      )                         ~ 1L,   # confirmed PF commercial varieties
+      NAME %in% c(
+        "Osage", "Ouachita", "Natchez",
+        "Apache", "Ponca", "Caddo",
+        "Navaho", "Lochness", "Immaculate",
+        "Von", "Tupy", "Stella"
+      )                         ~ 0L,   # confirmed FF commercial varieties
+      TRUE                      ~ NA_integer_  # unclassified — see warning below
+    )
+  )
+
+cat("[PF] PF=1:", sum(PF_tbl$PF == 1, na.rm = TRUE),
+    "| PF=0:", sum(PF_tbl$PF == 0, na.rm = TRUE),
+    "| PF=NA:", sum(is.na(PF_tbl$PF)), "\n")
+
+# Any name that reached NA is printed here for manual review
+na_names <- PF_tbl %>% filter(is.na(PF)) %>% pull(NAME)
+if (length(na_names) > 0) {
+  cat("[PF WARNING] Unclassified genotypes (PF=NA) — add to case_when above:\n")
+  print(na_names)
+}
+```
+
+## BLUP / BLUE Models
+
+Raw budbreak percentages contain both true genetic signal and noise from the field environment — specifically, spatial variation across the physical blocks of the trial. A plant in a sheltered block may have accumulated chill hours slightly differently from one in an exposed block. To separate these effects we fit a mixed model for each trait before passing phenotypes to GWASpoly.
+
+**BLUP (Best Linear Unbiased Prediction)** treats genotype as a **random effect**. The model is:
+
+```
+trait ~ Block + (1|NAME)
+```
+
+Here `Block` is the spatial block letter (A/B/C/D) as a fixed effect, capturing systematic environmental differences between blocks. `(1|NAME)` is the genotype random effect — the per-genotype deviation from the population mean after accounting for block. The BLUP value for each genotype is this random effect estimate: it is a **shrinkage estimator**, meaning genotypes with fewer replicates or noisier data are shrunk toward the population mean. This makes BLUPs conservative but stable across unbalanced designs.
+
+**BLUE (Best Linear Unbiased Estimate)** treats genotype as a **fixed effect**. The model is:
+
+```
+trait ~ Block + NAME
+```
+
+The BLUE for each genotype is the corresponding regression coefficient — the estimated genotype mean conditional on block. Unlike BLUPs, BLUEs are not shrunk toward the population mean, so they are more sensitive to sparse data but also more powerful when data is abundant and balanced.
+
+We fit both estimators and carry both through to GWAS as separate traits. If a model fails to converge (e.g., because the trait has very little variance within a block), the fallback is raw genotype means — a valid if less precise alternative.
+
+The `lmerControl(optimizer = "bobyqa")` setting tells `lme4` to use the BOBYQA numerical optimizer with an increased iteration budget (`maxfun = 1e5`). The default optimizer sometimes fails to converge on phenotypic data with skewed distributions like budbreak fractions; BOBYQA is more robust in practice for this type of data.
+
+```{r blup-blue}
+mk_blup_blue <- function(df, trait) {
+
+  message("[BLUP/BLUE] Processing: ", trait)
+
+  df <- df %>%
+    filter(!is.na(.data[[trait]]), is.finite(.data[[trait]]))
+
+  # Safety check: skip if there's not enough data to fit a meaningful model
+  if (nrow(df) < 10 || n_distinct(df$NAME) < 3) {
+    message("[SKIP] Not enough data for ", trait)
+    fallback <- df %>%
+      group_by(NAME) %>%
+      summarise(
+        !!paste0("BLUE_", trait) := mean(.data[[trait]], na.rm = TRUE),
+        !!paste0("BLUP_", trait) := mean(.data[[trait]], na.rm = TRUE),
+        .groups = "drop"
+      )
+    return(list(
+      BLUP = fallback %>% select(NAME, paste0("BLUP_", trait)),
+      BLUE = fallback %>% select(NAME, paste0("BLUE_", trait))
+    ))
+  }
+
+  # Convert NAME and Block to factors so lme4 treats them as categorical variables.
+  # Block must be a factor (not a character string) for the fixed-effect contrast
+  # coding to work correctly in both lmer and lm.
+  df$NAME  <- factor(df$NAME)
+  df$Block <- factor(df$Block)
+
+  # ── BLUP: genotype as random effect, block as fixed ───────────────────────
+  # REML=TRUE is the standard for random-effects estimation (vs ML used for
+  # fixed-effect testing). BOBYQA optimizer is more robust for bounded phenotypes.
+  blups_tbl <- tryCatch({
+    m1 <- lmer(
+      as.formula(paste0(trait, " ~ Block + (1|NAME)")),
+      data    = df,
+      REML    = TRUE,
+      control = lmerControl(optimizer = "bobyqa",
+                            optCtrl   = list(maxfun = 1e5))
+    )
+    re <- ranef(m1)$NAME   # extract genotype random effects
+    tibble(
+      NAME                      = rownames(re),
+      !!paste0("BLUP_", trait) := as.numeric(re[, "(Intercept)"])
+    )
+  }, error = function(e) {
+    message("[BLUP FAIL] Using genotype means for ", trait, " — ", conditionMessage(e))
+    df %>%
+      group_by(NAME) %>%
+      summarise(!!paste0("BLUP_", trait) := mean(.data[[trait]], na.rm = TRUE),
+                .groups = "drop")
+  })
+
+  # ── BLUE: genotype as fixed effect, block as fixed ────────────────────────
+  # Coefficients with "NAME" prefix are the per-genotype fixed effects.
+  # Note: the intercept represents the reference genotype (first level of NAME
+  # factor), so all other coefficients are relative contrasts. This is standard
+  # treatment contrast coding in R's lm().
+  blues_tbl <- tryCatch({
+    m2  <- lm(as.formula(paste0(trait, " ~ Block + NAME")), df)
+    co  <- coef(m2)
+    val <- co[grepl("^NAME", names(co))]
+    tibble(
+      NAME                      = gsub("^NAME", "", names(val)),
+      !!paste0("BLUE_", trait) := as.numeric(val)
+    )
+  }, error = function(e) {
+    message("[BLUE FAIL] Using genotype means for ", trait, " — ", conditionMessage(e))
+    df %>%
+      group_by(NAME) %>%
+      summarise(!!paste0("BLUE_", trait) := mean(.data[[trait]], na.rm = TRUE),
+                .groups = "drop")
+  })
+
+  list(BLUP = blups_tbl, BLUE = blues_tbl)
+}
+
+# Run models separately for each chill-hour block.
+# The left block (263h) provides PERCENT_15Jan phenotypes.
+# The right block (200h) provides PERCENT_3Jan phenotypes.
+bb3  <- mk_blup_blue(right_block, "PERCENT_3Jan")
+bb15 <- mk_blup_blue(left_block,  "PERCENT_15Jan")
+```
+
+## Composite Traits
+
+The two chill-hour treatments (200h and 263h) represent different points along the same biological response curve — the chilling requirement of each genotype. A genotype with a low chilling requirement will show high budbreak at both timepoints; one with a high requirement will show low budbreak at 200h but may catch up by 263h.
+
+Averaging the two timepoints into a single composite score collapses this two-dimensional phenotype into one number that captures overall chilling responsiveness across the range of conditions tested. This is useful as a GWAS trait because it increases power to detect QTL that influence chilling requirement globally, at the cost of losing the ability to detect QTL that specifically affect one chill level but not the other (which the individual-timepoint traits will catch).
+
+The join on `NAME` here is critical — we must ensure that the 3-Jan observation and the 15-Jan observation being averaged belong to the same genotype, not to different plants that happened to share a row in the Excel file.
+
+```{r composite-traits}
+# Per-genotype mean traits from each block
+left_means <- left_block %>%
+  group_by(NAME) %>%
+  summarise(across(c(BIN_15Jan, FRAC_15Jan, PERCENT_15Jan),
+                   \(x) mean(x, na.rm = TRUE)),
+            .groups = "drop")
+
+right_means <- right_block %>%
+  group_by(NAME) %>%
+  summarise(across(c(BIN_3Jan, FRAC_3Jan, PERCENT_3Jan),
+                   \(x) mean(x, na.rm = TRUE)),
+            .groups = "drop")
+
+# full_join preserves all genotypes even if one block has missing data for them
+COMP_tbl <- full_join(left_means, right_means, by = "NAME") %>%
+  mutate(
+    # rowMeans with na.rm=TRUE means a genotype present in only one block still
+    # gets a composite score (equal to its single-block value), rather than NA
+    COMP_PERCENT = rowMeans(cbind(PERCENT_3Jan, PERCENT_15Jan), na.rm = TRUE),
+    COMP_FRAC    = rowMeans(cbind(FRAC_3Jan,    FRAC_15Jan),    na.rm = TRUE)
+  )
+```
+
+## Phenotypic PCA (PC1 & PC2 Traits)
+
+Principal Component Analysis is applied here to the matrix of per-genotype budbreak trait means. This is a **phenotypic PCA** — it finds the directions of maximum variance in the phenotype space, not in the genome. The resulting PC scores are then used as GWAS traits in runs 13/14, 27/28, 41/42, and 55/56.
+
+The motivation is that individual budbreak traits are highly correlated with each other (a genotype that breaks many buds at 3-Jan also tends to break many at 15-Jan). Testing each trait separately is statistically valid, but GWAS power is spread across correlated phenotypes. A QTL that influences the overall budbreak axis may appear as a modest signal in each individual trait, but as a strong signal in the PC1 score that captures that axis. Conversely, a QTL that specifically governs the *contrast* between early and late budbreak — i.e., the timing of budbreak onset rather than its magnitude — may only appear in PC2.
+
+**Important:** this PCA does not replace the kinship-based population structure correction inside GWASpoly. The PC scores are phenotypes being mapped, not genomic PCs being used as covariates. GWASpoly handles population structure separately via the kinship matrix computed with `set.K()`.
+
+All four input traits (PERCENT_3Jan, PERCENT_15Jan, FRAC_3Jan, FRAC_15Jan) are scaled to unit variance before PCA so that no single trait dominates the axes due to scale differences (PERCENT is on a 0–100 scale; FRAC is on 0–1). After scaling, `prcomp()` with `center=FALSE, scale.=FALSE` is used because centering and scaling were already applied manually.
+
+```{r pca-phenotypic}
+# Input matrix: per-genotype means of four correlated budbreak traits
+# complete.cases() required because prcomp cannot handle missing values
+pca_input <- COMP_tbl %>%
+  select(NAME, PERCENT_3Jan, PERCENT_15Jan, FRAC_3Jan, FRAC_15Jan) %>%
+  filter(complete.cases(.))
+
+# scale() centers each column to mean=0 and scales to sd=1
+# This prevents PERCENT (0–100) from dominating over FRAC (0–1)
+pca_mat <- pca_input %>%
+  select(-NAME) %>%
+  scale()
+
+# prcomp performs singular value decomposition of the scaled matrix
+# center=FALSE and scale.=FALSE because we already did both above
+pca_res <- prcomp(pca_mat, center = FALSE, scale. = FALSE)
+
+# PC scores: each row is one genotype, columns are PC1 and PC2
+pca_scores <- tibble(
+  NAME = pca_input$NAME,
+  PC1  = pca_res$x[, 1],   # largest variance axis — overall budbreak responsiveness
+  PC2  = pca_res$x[, 2]    # second axis — early vs. late budbreak contrast
+)
+
+# Report variance explained — if PC1 < 50%, the "single axis" interpretation weakens
+var_exp <- summary(pca_res)$importance["Proportion of Variance", ]
+cat("[PCA] PC1 variance explained:", round(var_exp[1] * 100, 1), "%\n")
+cat("[PCA] PC2 variance explained:", round(var_exp[2] * 100, 1), "%\n")
+cat("[PCA] Genotypes included    :", nrow(pca_scores), "\n")
+```
+
+## Master Phenotype Table
+
+All derived traits — raw group means, BLUP-adjusted values, BLUE-adjusted values, composite scores, PC scores, and PF status — are assembled into a single wide table called `PH_MASTER`. This is the single source of truth for all downstream GWAS runs. Each row is one unique genotype (one `NAME`). The `left_join` operations mean that any genotype missing from a particular estimator (e.g., too few observations for BLUP) will have `NA` for that trait column, and the per-run GWAS function will skip that run gracefully if too few non-missing values remain.
+
+```{r master-phenotype}
+PH_MASTER <- COMP_tbl %>%
+  left_join(bb3$BLUP,   by = "NAME") %>%   # BLUP for PERCENT_3Jan
+  left_join(bb15$BLUP,  by = "NAME") %>%   # BLUP for PERCENT_15Jan
+  left_join(bb3$BLUE,   by = "NAME") %>%   # BLUE for PERCENT_3Jan
+  left_join(bb15$BLUE,  by = "NAME") %>%   # BLUE for PERCENT_15Jan
+  left_join(pca_scores, by = "NAME") %>%   # PC1 and PC2 from phenotypic PCA
+  left_join(PF_tbl,     by = "NAME")       # PF status (0/1/NA)
+
+cat("[PH_MASTER] Rows:", nrow(PH_MASTER),
+    "| Columns:", ncol(PH_MASTER), "\n")
+glimpse(PH_MASTER)
+```
+
+---
+
+# Genotype Harmonization
+
+The genotype file (CaptureSeq SNP matrix) and the phenotype file were generated by different pipelines and at different times. As a result, sample identifiers may differ in minor ways: underscores vs. hyphens, extra whitespace, or inconsistent capitalisation. If we tried to match them directly, many samples would silently fail to join and be excluded from the GWAS.
+
+To handle this, both sets of names are normalised to a canonical form — uppercase, no whitespace, underscores converted to hyphens — before matching. After matching, the genotype column names are renamed to exactly match `PH_MASTER$NAME` so that GWASpoly's internal join works correctly. The original genotype file is never modified; only the in-memory column names of the subset matrix are changed.
+
+The genotype matrix is also subsetted at this stage to keep only the samples that appear in both datasets. Samples that are genotyped but not phenotyped (or vice versa) are excluded. The harmonised subset is written to `geno_out` as a single CSV that all 56 GWAS runs will read from.
+
+```{r geno-harmonize}
+G <- data.table::fread(geno_file)
+names(G)[1:3] <- c("marker", "chrom", "pos")
+
+geno_samples <- setdiff(names(G), c("marker", "chrom", "pos"))
+pheno_names  <- unique(PH_MASTER$NAME)
+
+# Normalise both sets of names to canonical uppercase-no-space-hyphens form
+map <- tibble(orig = geno_samples) %>%
+  mutate(
+    upper = toupper(gsub("\\s+", "", gsub("_", "-", stringr::str_trim(orig))))
+  )
+
+pheno_tbl <- tibble(NAME = pheno_names) %>%
+  mutate(
+    NAME_upper = toupper(gsub("\\s+", "", stringr::str_trim(NAME)))
+  )
+
+join_map <- map %>%
+  inner_join(pheno_tbl, by = c("upper" = "NAME_upper"))
+
+cat("[GENO-HARM] PHENO N =", length(pheno_names),
+    "| GENO N =", length(geno_samples),
+    "| Overlap =", nrow(join_map), "\n")
+
+# Hard stop if fewer than 20 samples overlap — indicates a systematic ID mismatch
+if (nrow(join_map) < 20) {
+  cat("[GENO-HARM] Sample PHENO-only:\n"); print(head(setdiff(pheno_names, geno_samples), 20))
+  cat("[GENO-HARM] Sample GENO-only:\n");  print(head(setdiff(geno_samples, pheno_names), 20))
+  stop("FATAL: Fewer than 20 overlapping samples. Check genotype vs phenotype IDs.")
+}
+
+# Rename genotype columns so they exactly match PH_MASTER$NAME
+rename_pairs <- join_map %>% distinct(orig, NAME)
+for (i in seq_len(nrow(rename_pairs))) {
+  data.table::setnames(G, old = rename_pairs$orig[i], new = rename_pairs$NAME[i])
+}
+
+final_samples <- intersect(
+  setdiff(names(G), c("marker", "chrom", "pos")),
+  pheno_names
+)
+cat("[GENO-HARM] Final overlapping samples:", length(final_samples), "\n")
+
+if (length(final_samples) < 20) {
+  stop("Still too few overlapping samples (", length(final_samples),
+       "). Check name patterns manually.")
+}
+
+keep_cols <- c("marker", "chrom", "pos", final_samples)
+G_sub     <- G[, ..keep_cols]
+
+geno_out <- file.path(out_dir, "geno_numeric_tetra.csv")
+data.table::fwrite(G_sub, geno_out)
+cat("[GENO-HARM] Wrote", length(final_samples),
+    "individuals to:\n ", normalizePath(geno_out, mustWork = FALSE), "\n")
+```
+
+---
+
+# GWAS Run Configuration
+
+## Design Rationale
+
+The 56 runs are organised into four blocks, each testing a different combination of cohort and covariate. The full design is necessary because no single configuration answers all the questions we want to ask.
+
+**Block A (FFPF + PF covariate, Runs 1–14):** The full population is used, but PF status is included as a fixed-effect covariate in the GWASpoly model. This statistically removes the variance attributable to the known PF major locus before scanning the rest of the genome. Any QTL that survives in Block A is a budbreak locus that acts *independently* of PF status — these are the most biologically interesting hits for chilling-requirement genetics.
+
+**Block B (FFPF, no covariate, Runs 15–28):** The same full population, but without the PF covariate. The PF locus is now free to appear in the scan. Comparing Block A and Block B results directly reveals which genomic regions are driven by or confounded with PF status: a peak present in Block B but absent in Block A is a candidate PF-pleiotropic locus; a peak present in both blocks is PF-independent.
+
+**Block C (FF only, no covariate, Runs 29–42):** Restricted to floricane-fruiting genotypes only (PF=0). By removing all PF individuals entirely, the PF locus cannot generate signal regardless of whether it is modelled statistically. This is a complementary approach to Block A — instead of adjusting for PF, we eliminate it. QTL that appear in Block C but not Block A may have been suppressed in the full population by residual PF confounding.
+
+**Block D (PF only, no covariate, Runs 43–56):** Restricted to primocane-fruiting genotypes only (PF=1). This asks: within the PF background, are there additional genomic loci that modulate budbreak timing? Since all individuals share the PF allele, the PF major locus has no variance in this cohort and cannot generate signal. Hits here represent modifiers of budbreak within the PF genetic background specifically.
+
+## Trait Rationale
+
+Each of the 14 traits within a block represents a different transformation or summarisation of the underlying budbreak data:
+
+- **BIN** (binary): 1 if *any* budbreak occurred, 0 if none. Tests for presence/absence of budbreak response rather than magnitude. Useful for detecting loci with near-threshold effects on chilling requirement.
+- **FRAC** (fraction, 0–1): proportion of buds that broke. The raw proportional scale, retaining the bounded nature of the data.
+- **PERCENT** (0–100): identical to FRAC in information content but on a more intuitive scale. Included separately because the BLUP/BLUE models are fit on this scale.
+- **BLUP_PERCENT**: the per-genotype random effect from the mixed model — a block-corrected, shrinkage-adjusted estimate of genotype mean. Preferred when the dataset is unbalanced (unequal replication across genotypes).
+- **BLUE_PERCENT**: the per-genotype fixed-effect coefficient from the linear model — a block-corrected estimate without shrinkage. Preferred when replication is adequate and balanced.
+- **COMP_PERCENT / COMP_FRAC**: the average of the 3-Jan and 15-Jan values. Captures overall chilling responsiveness across both chill levels in a single score.
+- **PC1 / PC2**: phenotypic principal component scores across all four budbreak traits. PC1 captures the major axis of covariation (overall responsiveness); PC2 captures the contrast between early and late budbreak.
+
+```{r run-config}
+run_config <- tibble(
+  run_id = 1:56,
+
+  Cohort = c(
+    rep("FFPF", 14),   # Block A — 01–14 : all genotypes, PF as covariate
+    rep("FFPF", 14),   # Block B — 15–28 : all genotypes, no covariate (PF locus test)
+    rep("FF",   14),   # Block C — 29–42 : FF only, no covariate
+    rep("PF",   14)    # Block D — 43–56 : PF only, no covariate
+  ),
+
+  Trait = rep(c(
+    "BIN_3Jan",          "BIN_15Jan",
+    "FRAC_3Jan",         "FRAC_15Jan",
+    "PERCENT_3Jan",      "PERCENT_15Jan",
+    "BLUP_PERCENT_3Jan", "BLUP_PERCENT_15Jan",
+    "BLUE_PERCENT_3Jan", "BLUE_PERCENT_15Jan",
+    "COMP_PERCENT",      "COMP_FRAC",
+    "PC1",               "PC2"
+  ), 4),
+
+  Covariate = c(
+    rep("PF",   14),   # Block A
+    rep("None", 14),   # Block B
+    rep("None", 14),   # Block C
+    rep("None", 14)    # Block D
+  )
+) %>%
+  mutate(
+    Transformation = case_when(
+      startsWith(Trait, "BIN")        ~ "Binary (any budbreak)",
+      startsWith(Trait, "FRAC")       ~ "Fraction (0–1)",
+      startsWith(Trait, "PERCENT")    ~ "Percent (0–100)",
+      startsWith(Trait, "BLUP")       ~ "BLUP-adjusted percent",
+      startsWith(Trait, "BLUE")       ~ "BLUE-adjusted percent",
+      startsWith(Trait, "COMP")       ~ "Composite (mean of timepoints)",
+      Trait %in% c("PC1", "PC2")     ~ "PCA score (phenotypic)"
+    )
+  )
+
+# Returns the correct subset of PH_MASTER for a given cohort label.
+# FFPF = all classified genotypes (PF=0 and PF=1, excludes PF=NA)
+# FF   = only confirmed FF genotypes (PF=0)
+# PF   = only confirmed PF genotypes (PF=1)
+# The !is.na(PF) guard in FF and PF cases ensures that unclassified genotypes
+# (PF=NA) are never silently included in cohort-restricted runs.
+get_cohort_df <- function(x) {
+  if (x == "FFPF") return(PH_MASTER %>% filter(!is.na(PF)))
+  if (x == "FF")   return(PH_MASTER %>% filter(!is.na(PF), PF == 0))
+  if (x == "PF")   return(PH_MASTER %>% filter(!is.na(PF), PF == 1))
+  stop("Unknown cohort: ", x)
+}
+
+knitr::kable(run_config, caption = "56-run GWAS configuration — all four blocks")
+```
+
+---
+
+# Single-Run GWAS Function
+
+This function encapsulates one complete GWAS analysis. It is called once per run ID. The steps inside are:
+
+1. **Pull cohort and trait** from `run_config` using the run ID.
+2. **Safety checks** — skip the run if the trait column is missing from `PH_MASTER` (e.g., if BLUP failed entirely) or if fewer than 20 non-missing phenotypic observations are available. GWASpoly will error out rather than produce meaningful results with very small sample sizes.
+3. **Write a per-run phenotype CSV** containing only `NAME`, the trait column, and (if applicable) the `PF` covariate column. GWASpoly reads phenotype data from a file rather than an in-memory object, so this intermediate file is required.
+4. **`read.GWASpoly()`** — loads the phenotype and genotype files into a GWASpoly data object. `ploidy=4` specifies tetraploid dosage coding. `format="numeric"` means the genotype matrix contains allele dosage values (0–4) rather than VCF-style calls. `n.traits` is computed dynamically as the number of non-NAME columns in the phenotype file — either 1 (trait only) or 2 (trait + PF covariate), so GWASpoly knows how many columns are traits vs. fixed effects.
+5. **`set.K()`** — computes the kinship matrix (K matrix) from the marker data. The kinship matrix captures genome-wide relatedness between individuals and is used as a random effect in the GWAS mixed model to control for population structure and cryptic relatedness. `LOCO=TRUE` means Leave-One-Chromosome-Out: when testing markers on chromosome N, the kinship matrix is recomputed using all chromosomes *except* N. This prevents the causal chromosome from inflating its own kinship-based correction and reduces the risk of masking true QTL on chromosomes with strong population differentiation.
+6. **`set.params()`** — defines any additional fixed effects beyond the kinship correction. For Block A runs, PF is passed as a fixed factor. For all other blocks, no additional fixed effects are used — the kinship matrix alone handles confounding.
+7. **`GWASpoly()`** — fits the mixed model at every marker and returns association statistics. Four genetic models are tested at each marker: `additive` (effect proportional to allele dosage 0–4), `1-dom` (dominant effect for one copy of the minor allele), `2-dom` (dominant effect for two copies), and `general` (unrestricted dosage effect). Testing multiple models increases power across different genetic architectures without requiring prior knowledge of dominance.
+8. **`set.threshold()`** — computes the significance threshold using the `M.eff` (effective number of markers) method at α = 0.05. This is a genome-wide multiple testing correction adapted for polyploids, accounting for linkage disequilibrium among markers rather than applying a naive Bonferroni correction that would be overly conservative.
+9. **Output** — association scores and QTL tables are written to `out_dir`. The Manhattan plot is saved as a high-resolution PNG to `mp_outdir` using the naming convention `{run_id}_{trait}.png`, which is the format the Results section expects when loading plots.
+
+```{r gwas-function}
+run_gwas_single <- function(run_id) {
+
+  cfg   <- run_config %>% filter(run_id == !!run_id)
+  df    <- get_cohort_df(cfg$Cohort)
+  trait <- cfg$Trait
+  cov   <- cfg$Covariate
+
+  # Skip if trait was never computed (e.g. BLUP model collapsed entirely)
+  if (!trait %in% names(df)) {
+    message("[SKIP] Trait not found in PH_MASTER: ", trait,
+            " (Run ", run_id, ")")
+    return(invisible(NULL))
+  }
+
+  # Skip if sample size too small for a meaningful GWAS
+  n_non_missing <- sum(!is.na(df[[trait]]))
+  if (n_non_missing < 20) {
+    message("[SKIP] Too few non-missing observations (", n_non_missing,
+            ") for trait: ", trait, " (Run ", run_id, ")")
+    return(invisible(NULL))
+  }
+
+  # Build the per-run phenotype file: NAME + trait + PF covariate (if Block A)
+  df_use <- if (cov == "PF") {
+    df %>% select(NAME, all_of(trait), PF) %>% filter(!is.na(.data[[trait]]))
+  } else {
+    df %>% select(NAME, all_of(trait)) %>% filter(!is.na(.data[[trait]]))
+  }
+
+  pheno_out <- file.path(out_dir, paste0("pheno_run", run_id, ".csv"))
+  data.table::fwrite(df_use, pheno_out)
+
+  # n.traits = number of phenotype columns (excludes NAME column).
+  # For Block A: n.traits = 2 (trait + PF); for all others: n.traits = 1.
+  # GWASpoly uses this to know where phenotype columns end and fixed-effect
+  # columns begin when reading the phenotype file.
+  n_traits_val <- ncol(df_use) - 1
+
+  data_gp <- GWASpoly::read.GWASpoly(
+    ploidy     = 4,          # tetraploid — allele dosage 0, 1, 2, 3, or 4
+    pheno.file = pheno_out,
+    geno.file  = geno_out,
+    format     = "numeric",  # dosage-coded genotype matrix (not VCF)
+    n.traits   = n_traits_val
+  )
+
+  # LOCO kinship: chromosome being tested is excluded from K computation
+  # to avoid the causal chromosome suppressing its own QTL signal
+  data_gp <- GWASpoly::set.K(data_gp, LOCO = TRUE)
+
+  # Fixed effects: PF as factor for Block A; nothing additional otherwise
+  params <- if (cov == "PF") {
+    GWASpoly::set.params(fixed = "PF", fixed.type = "factor")
+  } else {
+    GWASpoly::set.params()
+  }
+
+  # Fit GWAS across four genetic models simultaneously
+  fit <- GWASpoly::GWASpoly(
+    data    = data_gp,
+    traits  = trait,
+    models  = c("additive", "1-dom", "2-dom", "general"),
+    params  = params,
+    n.core  = max(1, parallel::detectCores() - 1)  # use all available cores minus one
+  )
+
+  # M.eff threshold: effective marker number correction, accounts for LD
+  thr <- GWASpoly::set.threshold(fit, method = "M.eff", level = 0.05)
+
+  base <- file.path(
+    out_dir,
+    paste0("GWAS_run", run_id, "_", cfg$Cohort, "_", trait)
+  )
+
+  # Write full marker score table
+  GWASpoly::write.GWASpoly(
+    thr,
+    trait    = trait,
+    filename = paste0(base, "_scores.csv"),
+    what     = "scores"
+  )
+
+  # Extract QTL peaks above threshold; bp.window collapses nearby peaks within 5 Mb
+  qtl <- GWASpoly::get.QTL(
+    thr,
+    traits    = trait,
+    models    = "additive",
+    bp.window = 5e6
+  )
+  data.table::fwrite(qtl, paste0(base, "_QTL.csv"))
+
+  # Save Manhattan plot — file name must match {run_id}_{trait}.png for display below
+  p <- GWASpoly::manhattan.plot(thr, traits = trait)
+  save_png_hq(p, file.path(mp_outdir, paste0(run_id, "_", trait, ".png")))
+
+  message("[DONE] Run ", run_id, " | ", cfg$Cohort,
+          " | ", trait, " | Cov=", cov)
+}
+```
+
+---
+
+# OPTIONAL: Re-Run Manhattan Plots {#optional-rerun}
+
+> **This chunk is `eval=FALSE` by default — nothing here runs on document render.**
+> Uncomment individual `run_gwas_single()` lines and execute them interactively
+> in VSCode to regenerate specific plots. The display sections below will
+> automatically pick up the updated PNGs on the next render with no other changes.
+
+```{r optional-rerun, eval=FALSE}
+# =============================================================================
+# OPTIONAL: Re-Run Manhattan — uncomment any line below to re-run that analysis
+# Updated PNGs are picked up automatically by the display sections on next render
+# =============================================================================
+
+# ── Block A: FFPF with PF covariate (Runs 1–14) ──────────────────────────────
+# run_gwas_single(1)   # BIN_3Jan           | Binary
+# run_gwas_single(2)   # BIN_15Jan          | Binary
+# run_gwas_single(3)   # FRAC_3Jan          | Fraction (0-1)
+# run_gwas_single(4)   # FRAC_15Jan         | Fraction (0-1)
+# run_gwas_single(5)   # PERCENT_3Jan       | Percent (0-100)
+# run_gwas_single(6)   # PERCENT_15Jan      | Percent (0-100)
+# run_gwas_single(7)   # BLUP_PERCENT_3Jan  | BLUP-adjusted percent
+# run_gwas_single(8)   # BLUP_PERCENT_15Jan | BLUP-adjusted percent
+# run_gwas_single(9)   # BLUE_PERCENT_3Jan  | BLUE-adjusted percent
+# run_gwas_single(10)  # BLUE_PERCENT_15Jan | BLUE-adjusted percent
+# run_gwas_single(11)  # COMP_PERCENT       | Composite (mean of timepoints)
+# run_gwas_single(12)  # COMP_FRAC          | Composite (mean of timepoints)
+# run_gwas_single(13)  # PC1                | PCA score (phenotypic)
+# run_gwas_single(14)  # PC2                | PCA score (phenotypic)
+
+# ── Block B: FFPF without PF covariate / PF locus test (Runs 15–28) ──────────
+# run_gwas_single(15)  # BIN_3Jan           | Binary
+# run_gwas_single(16)  # BIN_15Jan          | Binary
+# run_gwas_single(17)  # FRAC_3Jan          | Fraction (0-1)
+# run_gwas_single(18)  # FRAC_15Jan         | Fraction (0-1)
+# run_gwas_single(19)  # PERCENT_3Jan       | Percent (0-100)
+# run_gwas_single(20)  # PERCENT_15Jan      | Percent (0-100)
+# run_gwas_single(21)  # BLUP_PERCENT_3Jan  | BLUP-adjusted percent
+# run_gwas_single(22)  # BLUP_PERCENT_15Jan | BLUP-adjusted percent
+# run_gwas_single(23)  # BLUE_PERCENT_3Jan  | BLUE-adjusted percent
+# run_gwas_single(24)  # BLUE_PERCENT_15Jan | BLUE-adjusted percent
+# run_gwas_single(25)  # COMP_PERCENT       | Composite (mean of timepoints)
+# run_gwas_single(26)  # COMP_FRAC          | Composite (mean of timepoints)
+# run_gwas_single(27)  # PC1                | PCA score (phenotypic)
+# run_gwas_single(28)  # PC2                | PCA score (phenotypic)
+
+# ── Block C: FF only, no covariate (Runs 29–42) ───────────────────────────────
+# run_gwas_single(29)  # BIN_3Jan           | Binary
+# run_gwas_single(30)  # BIN_15Jan          | Binary
+# run_gwas_single(31)  # FRAC_3Jan          | Fraction (0-1)
+# run_gwas_single(32)  # FRAC_15Jan         | Fraction (0-1)
+# run_gwas_single(33)  # PERCENT_3Jan       | Percent (0-100)
+# run_gwas_single(34)  # PERCENT_15Jan      | Percent (0-100)
+# run_gwas_single(35)  # BLUP_PERCENT_3Jan  | BLUP-adjusted percent
+# run_gwas_single(36)  # BLUP_PERCENT_15Jan | BLUP-adjusted percent
+# run_gwas_single(37)  # BLUE_PERCENT_3Jan  | BLUE-adjusted percent
+# run_gwas_single(38)  # BLUE_PERCENT_15Jan | BLUE-adjusted percent
+# run_gwas_single(39)  # COMP_PERCENT       | Composite (mean of timepoints)
+# run_gwas_single(40)  # COMP_FRAC          | Composite (mean of timepoints)
+# run_gwas_single(41)  # PC1                | PCA score (phenotypic)
+# run_gwas_single(42)  # PC2                | PCA score (phenotypic)
+
+# ── Block D: PF only, no covariate (Runs 43–56) ───────────────────────────────
+# run_gwas_single(43)  # BIN_3Jan           | Binary
+# run_gwas_single(44)  # BIN_15Jan          | Binary
+# run_gwas_single(45)  # FRAC_3Jan          | Fraction (0-1)
+# run_gwas_single(46)  # FRAC_15Jan         | Fraction (0-1)
+# run_gwas_single(47)  # PERCENT_3Jan       | Percent (0-100)
+# run_gwas_single(48)  # PERCENT_15Jan      | Percent (0-100)
+# run_gwas_single(49)  # BLUP_PERCENT_3Jan  | BLUP-adjusted percent
+# run_gwas_single(50)  # BLUP_PERCENT_15Jan | BLUP-adjusted percent
+# run_gwas_single(51)  # BLUE_PERCENT_3Jan  | BLUE-adjusted percent
+# run_gwas_single(52)  # BLUE_PERCENT_15Jan | BLUE-adjusted percent
+# run_gwas_single(53)  # COMP_PERCENT       | Composite (mean of timepoints)
+# run_gwas_single(54)  # COMP_FRAC          | Composite (mean of timepoints)
+# run_gwas_single(55)  # PC1                | PCA score (phenotypic)
+# run_gwas_single(56)  # PC2                | PCA score (phenotypic)
+
+# ── Re-run an entire block at once ───────────────────────────────────────────
+# for (i in 1:14)  run_gwas_single(i)   # Block A — FFPF + PF covariate
+# for (i in 15:28) run_gwas_single(i)   # Block B — FFPF, no covariate
+# for (i in 29:42) run_gwas_single(i)   # Block C — FF only
+# for (i in 43:56) run_gwas_single(i)   # Block D — PF only
+
+# ── Re-run everything ─────────────────────────────────────────────────────────
+# for (i in 1:56) run_gwas_single(i)
+```
+
+---
+
+# Results — Manhattan Plots
+
+PNGs are loaded directly from `mp_outdir`. If a run has not been executed yet, a placeholder message is shown instead of a missing image error. Each section header follows the format: **Run N | Cohort | Trait | Transformation | Covariate**.
+
+```{r plot-helper, include=FALSE}
+show_manhattan <- function(run_id) {
+  cfg  <- run_config %>% filter(run_id == !!run_id)
+  path <- file.path(mp_outdir, paste0(run_id, "_", cfg$Trait, ".png"))
+  if (file.exists(path)) {
+    knitr::include_graphics(path)
+  } else {
+    cat("> ⚠️ **Plot not yet generated.**",
+        "Run `run_gwas_single(", run_id, ")` in the OPTIONAL block above,",
+        "then re-render this document.\n\n")
+  }
+}
+```
+
+## Block A — FFPF with PF Covariate (Runs 1–14)
+
+*Cohort: all genotypes (FF + PF) | Covariate: PF status as fixed effect.*
+*QTL detected here are independent of PF status — the PF major locus variance has been statistically removed before scanning. These are the strongest candidates for genuine chilling-requirement loci.*
+
+### Run 1 | FFPF | BIN_3Jan | Binary (any budbreak) | Covariate: PF
+
+```{r plot-01, echo=FALSE, out.width="100%"}
+show_manhattan(1)
+```
+
+### Run 2 | FFPF | BIN_15Jan | Binary (any budbreak) | Covariate: PF
+
+```{r plot-02, echo=FALSE, out.width="100%"}
+show_manhattan(2)
+```
+
+### Run 3 | FFPF | FRAC_3Jan | Fraction (0–1) | Covariate: PF
+
+```{r plot-03, echo=FALSE, out.width="100%"}
+show_manhattan(3)
+```
+
+### Run 4 | FFPF | FRAC_15Jan | Fraction (0–1) | Covariate: PF
+
+```{r plot-04, echo=FALSE, out.width="100%"}
+show_manhattan(4)
+```
+
+### Run 5 | FFPF | PERCENT_3Jan | Percent (0–100) | Covariate: PF
+
+```{r plot-05, echo=FALSE, out.width="100%"}
+show_manhattan(5)
+```
+
+### Run 6 | FFPF | PERCENT_15Jan | Percent (0–100) | Covariate: PF
+
+```{r plot-06, echo=FALSE, out.width="100%"}
+show_manhattan(6)
+```
+
+### Run 7 | FFPF | BLUP_PERCENT_3Jan | BLUP-adjusted percent | Covariate: PF
+
+```{r plot-07, echo=FALSE, out.width="100%"}
+show_manhattan(7)
+```
+
+### Run 8 | FFPF | BLUP_PERCENT_15Jan | BLUP-adjusted percent | Covariate: PF
+
+```{r plot-08, echo=FALSE, out.width="100%"}
+show_manhattan(8)
+```
+
+### Run 9 | FFPF | BLUE_PERCENT_3Jan | BLUE-adjusted percent | Covariate: PF
+
+```{r plot-09, echo=FALSE, out.width="100%"}
+show_manhattan(9)
+```
+
+### Run 10 | FFPF | BLUE_PERCENT_15Jan | BLUE-adjusted percent | Covariate: PF
+
+```{r plot-10, echo=FALSE, out.width="100%"}
+show_manhattan(10)
+```
+
+### Run 11 | FFPF | COMP_PERCENT | Composite (mean of timepoints) | Covariate: PF
+
+```{r plot-11, echo=FALSE, out.width="100%"}
+show_manhattan(11)
+```
+
+### Run 12 | FFPF | COMP_FRAC | Composite (mean of timepoints) | Covariate: PF
+
+```{r plot-12, echo=FALSE, out.width="100%"}
+show_manhattan(12)
+```
+
+### Run 13 | FFPF | PC1 | PCA score (phenotypic) | Covariate: PF
+
+> **PCA NOTE:** PC1 captures the largest axis of phenotypic covariation across all budbreak traits — typically overall responsiveness to chilling. Using PC1 with PF as covariate tests whether genomic loci explain budbreak variation *beyond* what is attributable to PF status. Compare with Run 27 (same trait, no covariate): signals that disappear when PF is added are confounded with PF; signals that remain are independent budbreak QTL.
+
+```{r plot-13, echo=FALSE, out.width="100%"}
+show_manhattan(13)
+```
+
+### Run 14 | FFPF | PC2 | PCA score (phenotypic) | Covariate: PF
+
+> **PCA NOTE:** PC2 typically captures the contrast between early (3-Jan) and late (15-Jan) budbreak — genotypes that burst quickly vs. those that spread budbreak across the assessment window. Significant loci here may regulate the *rate* of budbreak onset rather than the overall chilling requirement magnitude. Compare with Run 28 (same trait, no covariate) to identify which PC2 signals are PF-independent.
+
+```{r plot-14, echo=FALSE, out.width="100%"}
+show_manhattan(14)
+```
+
+---
+
+## Block B — FFPF without PF Covariate / PF Locus Test (Runs 15–28)
+
+*Cohort: all genotypes (FF + PF) | Covariate: none.*
+*Without PF controlled, the PF locus is free to generate signal. Peaks present here but absent in Block A are driven by or confounded with PF. Peaks shared between Block A and Block B are PF-independent budbreak QTL.*
+
+### Run 15 | FFPF | BIN_3Jan | Binary (any budbreak) | No covariate
+
+```{r plot-15, echo=FALSE, out.width="100%"}
+show_manhattan(15)
+```
+
+### Run 16 | FFPF | BIN_15Jan | Binary (any budbreak) | No covariate
+
+```{r plot-16, echo=FALSE, out.width="100%"}
+show_manhattan(16)
+```
+
+### Run 17 | FFPF | FRAC_3Jan | Fraction (0–1) | No covariate
+
+```{r plot-17, echo=FALSE, out.width="100%"}
+show_manhattan(17)
+```
+
+### Run 18 | FFPF | FRAC_15Jan | Fraction (0–1) | No covariate
+
+```{r plot-18, echo=FALSE, out.width="100%"}
+show_manhattan(18)
+```
+
+### Run 19 | FFPF | PERCENT_3Jan | Percent (0–100) | No covariate
+
+```{r plot-19, echo=FALSE, out.width="100%"}
+show_manhattan(19)
+```
+
+### Run 20 | FFPF | PERCENT_15Jan | Percent (0–100) | No covariate
+
+```{r plot-20, echo=FALSE, out.width="100%"}
+show_manhattan(20)
+```
+
+### Run 21 | FFPF | BLUP_PERCENT_3Jan | BLUP-adjusted percent | No covariate
+
+```{r plot-21, echo=FALSE, out.width="100%"}
+show_manhattan(21)
+```
+
+### Run 22 | FFPF | BLUP_PERCENT_15Jan | BLUP-adjusted percent | No covariate
+
+```{r plot-22, echo=FALSE, out.width="100%"}
+show_manhattan(22)
+```
+
+### Run 23 | FFPF | BLUE_PERCENT_3Jan | BLUE-adjusted percent | No covariate
+
+```{r plot-23, echo=FALSE, out.width="100%"}
+show_manhattan(23)
+```
+
+### Run 24 | FFPF | BLUE_PERCENT_15Jan | BLUE-adjusted percent | No covariate
+
+```{r plot-24, echo=FALSE, out.width="100%"}
+show_manhattan(24)
+```
+
+### Run 25 | FFPF | COMP_PERCENT | Composite (mean of timepoints) | No covariate
+
+```{r plot-25, echo=FALSE, out.width="100%"}
+show_manhattan(25)
+```
+
+### Run 26 | FFPF | COMP_FRAC | Composite (mean of timepoints) | No covariate
+
+```{r plot-26, echo=FALSE, out.width="100%"}
+show_manhattan(26)
+```
+
+### Run 27 | FFPF | PC1 | PCA score (phenotypic) | No covariate
+
+> **PCA NOTE:** Same PC1 trait as Run 13, but without PF as a covariate. A strong signal at the known PF locus here that is absent or reduced in Run 13 confirms that locus is a major driver of the PC1 variance axis. Signals present in both Run 13 and Run 27 are PF-independent budbreak QTL worth prioritising for follow-up.
+
+```{r plot-27, echo=FALSE, out.width="100%"}
+show_manhattan(27)
+```
+
+### Run 28 | FFPF | PC2 | PCA score (phenotypic) | No covariate
+
+> **PCA NOTE:** PC2 without PF covariate. Signals here that disappear in Run 14 (with PF covariate) indicate those loci are confounded with PF. Signals that appear in both are genuine early-vs-late budbreak timing QTL that are independent of whether the plant is PF or FF.
+
+```{r plot-28, echo=FALSE, out.width="100%"}
+show_manhattan(28)
+```
+
+---
+
+## Block C — FF Only, No Covariate (Runs 29–42)
+
+*Cohort: floricane-fruiting genotypes only (PF = 0) | Covariate: none.*
+*PF locus confounding is eliminated entirely by cohort restriction rather than statistical control. All individuals share the FF allele at the PF locus, so it has no variance and cannot generate signal. QTL found here are FF-background budbreak loci.*
+
+### Run 29 | FF | BIN_3Jan | Binary (any budbreak) | No covariate
+
+```{r plot-29, echo=FALSE, out.width="100%"}
+show_manhattan(29)
+```
+
+### Run 30 | FF | BIN_15Jan | Binary (any budbreak) | No covariate
+
+```{r plot-30, echo=FALSE, out.width="100%"}
+show_manhattan(30)
+```
+
+### Run 31 | FF | FRAC_3Jan | Fraction (0–1) | No covariate
+
+```{r plot-31, echo=FALSE, out.width="100%"}
+show_manhattan(31)
+```
+
+### Run 32 | FF | FRAC_15Jan | Fraction (0–1) | No covariate
+
+```{r plot-32, echo=FALSE, out.width="100%"}
+show_manhattan(32)
+```
+
+### Run 33 | FF | PERCENT_3Jan | Percent (0–100) | No covariate
+
+```{r plot-33, echo=FALSE, out.width="100%"}
+show_manhattan(33)
+```
+
+### Run 34 | FF | PERCENT_15Jan | Percent (0–100) | No covariate
+
+```{r plot-34, echo=FALSE, out.width="100%"}
+show_manhattan(34)
+```
+
+### Run 35 | FF | BLUP_PERCENT_3Jan | BLUP-adjusted percent | No covariate
+
+```{r plot-35, echo=FALSE, out.width="100%"}
+show_manhattan(35)
+```
+
+### Run 36 | FF | BLUP_PERCENT_15Jan | BLUP-adjusted percent | No covariate
+
+```{r plot-36, echo=FALSE, out.width="100%"}
+show_manhattan(36)
+```
+
+### Run 37 | FF | BLUE_PERCENT_3Jan | BLUE-adjusted percent | No covariate
+
+```{r plot-37, echo=FALSE, out.width="100%"}
+show_manhattan(37)
+```
+
+### Run 38 | FF | BLUE_PERCENT_15Jan | BLUE-adjusted percent | No covariate
+
+```{r plot-38, echo=FALSE, out.width="100%"}
+show_manhattan(38)
+```
+
+### Run 39 | FF | COMP_PERCENT | Composite (mean of timepoints) | No covariate
+
+```{r plot-39, echo=FALSE, out.width="100%"}
+show_manhattan(39)
+```
+
+### Run 40 | FF | COMP_FRAC | Composite (mean of timepoints) | No covariate
+
+```{r plot-40, echo=FALSE, out.width="100%"}
+show_manhattan(40)
+```
+
+### Run 41 | FF | PC1 | PCA score (phenotypic) | No covariate
+
+> **PCA NOTE:** PC1 computed across all genotypes but mapped only within the FF cohort. Because all PF genotypes are excluded, the first PC here reflects budbreak variation purely within FF genetic backgrounds. Signals here that are absent in Runs 13/27 (full FFPF cohort) may have been suppressed in the full population by the dominant PF allele variance swamping the mixed model.
+
+```{r plot-41, echo=FALSE, out.width="100%"}
+show_manhattan(41)
+```
+
+### Run 42 | FF | PC2 | PCA score (phenotypic) | No covariate
+
+> **PCA NOTE:** PC2 within the FF-only cohort captures early-vs-late budbreak contrast within FF lines exclusively. Compare with Run 14 (FFPF + PF covariate) and Run 28 (FFPF, no covariate) to distinguish loci that operate across all genetic backgrounds from those that are FF-specific modifiers.
+
+```{r plot-42, echo=FALSE, out.width="100%"}
+show_manhattan(42)
+```
+
+---
+
+## Block D — PF Only, No Covariate (Runs 43–56)
+
+*Cohort: primocane-fruiting genotypes only (PF = 1) | Covariate: none.*
+*All individuals carry the PF allele, so the PF locus has zero variance within this cohort and cannot generate signal. QTL detected here are modifier loci that influence budbreak timing specifically within the PF genetic background. Compare with Block C to identify loci shared across backgrounds vs. PF-specific.*
+
+### Run 43 | PF | BIN_3Jan | Binary (any budbreak) | No covariate
+
+```{r plot-43, echo=FALSE, out.width="100%"}
+show_manhattan(43)
+```
+
+### Run 44 | PF | BIN_15Jan | Binary (any budbreak) | No covariate
+
+```{r plot-44, echo=FALSE, out.width="100%"}
+show_manhattan(44)
+```
+
+### Run 45 | PF | FRAC_3Jan | Fraction (0–1) | No covariate
+
+```{r plot-45, echo=FALSE, out.width="100%"}
+show_manhattan(45)
+```
+
+### Run 46 | PF | FRAC_15Jan | Fraction (0–1) | No covariate
+
+```{r plot-46, echo=FALSE, out.width="100%"}
+show_manhattan(46)
+```
+
+### Run 47 | PF | PERCENT_3Jan | Percent (0–100) | No covariate
+
+```{r plot-47, echo=FALSE, out.width="100%"}
+show_manhattan(47)
+```
+
+### Run 48 | PF | PERCENT_15Jan | Percent (0–100) | No covariate
+
+```{r plot-48, echo=FALSE, out.width="100%"}
+show_manhattan(48)
+```
+
+### Run 49 | PF | BLUP_PERCENT_3Jan | BLUP-adjusted percent | No covariate
+
+```{r plot-49, echo=FALSE, out.width="100%"}
+show_manhattan(49)
+```
+
+### Run 50 | PF | BLUP_PERCENT_15Jan | BLUP-adjusted percent | No covariate
+
+```{r plot-50, echo=FALSE, out.width="100%"}
+show_manhattan(50)
+```
+
+### Run 51 | PF | BLUE_PERCENT_3Jan | BLUE-adjusted percent | No covariate
+
+```{r plot-51, echo=FALSE, out.width="100%"}
+show_manhattan(51)
+```
+
+### Run 52 | PF | BLUE_PERCENT_15Jan | BLUE-adjusted percent | No covariate
+
+```{r plot-52, echo=FALSE, out.width="100%"}
+show_manhattan(52)
+```
+
+### Run 53 | PF | COMP_PERCENT | Composite (mean of timepoints) | No covariate
+
+```{r plot-53, echo=FALSE, out.width="100%"}
+show_manhattan(53)
+```
+
+### Run 54 | PF | COMP_FRAC | Composite (mean of timepoints) | No covariate
+
+```{r plot-54, echo=FALSE, out.width="100%"}
+show_manhattan(54)
+```
+
+### Run 55 | PF | PC1 | PCA score (phenotypic) | No covariate
+
+> **PCA NOTE:** PC1 mapped within the PF-only cohort. Within this background, all plants share the PF allele, so PC1 here reflects variation in overall chilling responsiveness that is independent of PF vs. FF status entirely. A QTL appearing here but not in Block C (FF-only PC1, Run 41) is a PF-background-specific modifier of overall budbreak. A QTL appearing in both is a background-agnostic chilling locus.
+
+```{r plot-55, echo=FALSE, out.width="100%"}
+show_manhattan(55)
+```
+
+### Run 56 | PF | PC2 | PCA score (phenotypic) | No covariate
+
+> **PCA NOTE:** PC2 within the PF-only cohort captures the early-vs-late budbreak contrast specifically among PF genotypes. Compare with Block C Run 42 (FF PC2) to test whether the timing architecture of budbreak onset differs between PF and FF genetic backgrounds. Shared loci in both suggest a common timing mechanism; PF-only loci in this run may represent novel epistatic interactions with the PF allele.
+
+```{r plot-56, echo=FALSE, out.width="100%"}
+show_manhattan(56)
+```
+
+---
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```
