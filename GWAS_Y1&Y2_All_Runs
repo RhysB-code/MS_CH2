@@ -1,0 +1,1620 @@
+---
+title: "Blackberry Budbreak GWAS"
+subtitle: "Two-Year Tetraploid Pipeline — Y1 (2024–25) & Y2 (2025–26)"
+author: "Rhys Brock"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-summary: "▶ Show code"
+    self-contained: true
+    theme: cosmo
+    fig-width: 13
+    fig-height: 7
+execute:
+  warning: false
+  message: false
+  cache: false
+---
+
+```{=html}
+<style>
+/* ── Typography & base ────────────────────────────────────────────── */
+body { font-family: "Lato", "Helvetica Neue", sans-serif; color: #2c3e50; line-height: 1.7; }
+h1, h2, h3, h4 { color: #1a3a4a; font-weight: 700; }
+h1 { border-bottom: 3px solid #2e7d52; padding-bottom: 0.3em; margin-top: 1.2em; }
+h2 { border-left: 5px solid #2e7d52; padding-left: 0.7em; margin-top: 1.8em; }
+h3 { color: #2e7d52; margin-top: 1.3em; }
+h4 { color: #1a5fa8; font-size: 1em; }
+
+/* ── Section banners ─────────────────────────────────────────────── */
+.banner {
+  background: linear-gradient(135deg, #1a3a4a 0%, #2e7d52 100%);
+  color: white; padding: 1.1em 1.6em; border-radius: 8px;
+  margin: 2em 0 1em; font-size: 1.1em; font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.banner-y1 {
+  background: linear-gradient(135deg, #1a5fa8 0%, #2471b5 100%);
+  color: white; padding: 0.9em 1.4em; border-radius: 8px;
+  margin: 1.5em 0 0.8em; font-size: 1.05em; font-weight: 700;
+}
+.banner-y2 {
+  background: linear-gradient(135deg, #6d3a9c 0%, #8e44ad 100%);
+  color: white; padding: 0.9em 1.4em; border-radius: 8px;
+  margin: 1.5em 0 0.8em; font-size: 1.05em; font-weight: 700;
+}
+.banner-comb {
+  background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%);
+  color: white; padding: 0.9em 1.4em; border-radius: 8px;
+  margin: 1.5em 0 0.8em; font-size: 1.05em; font-weight: 700;
+}
+
+/* ── Info boxes ──────────────────────────────────────────────────── */
+.info-box  { background:#eaf4ee; border-left:5px solid #2e7d52; border-radius:0 6px 6px 0; padding:0.85em 1.1em; margin:0.9em 0; color:#1a3a4a; }
+.warn-box  { background:#fef9ec; border-left:5px solid #e6a817; border-radius:0 6px 6px 0; padding:0.85em 1.1em; margin:0.9em 0; color:#4a3800; }
+.stat-box  { background:#eaf1fb; border-left:5px solid #1a5fa8; border-radius:0 6px 6px 0; padding:0.85em 1.1em; margin:0.9em 0; color:#0d2d54; }
+.code-box  { background:#f5f5f5; border-left:5px solid #7f8c8d; border-radius:0 6px 6px 0; padding:0.85em 1.1em; margin:0.9em 0; color:#2c3e50; font-family: monospace; }
+
+/* ── Tables ──────────────────────────────────────────────────────── */
+table { border-collapse:collapse; width:100%; margin:1em 0; font-size:0.9em; }
+thead tr { background:#1a3a4a; color:white; }
+thead th  { padding:0.55em 0.9em; text-align:left; }
+tbody tr:nth-child(even) { background:#f0f5f2; }
+tbody tr:hover { background:#d8ede2; }
+tbody td  { padding:0.45em 0.9em; border-bottom:1px solid #cde0d4; }
+
+/* ── Block color badges ──────────────────────────────────────────── */
+.badge {
+  display:inline-block; padding:2px 10px; border-radius:12px;
+  font-size:0.78em; font-weight:700; vertical-align:middle;
+  margin-left:6px;
+}
+.badge-y1   { background:#dbeafe; color:#1e40af; border:1px solid #93c5fd; }
+.badge-y2   { background:#ede9fe; color:#6d28d9; border:1px solid #c4b5fd; }
+.badge-comb { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+.badge-ff   { background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; }
+.badge-pf   { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; }
+.badge-ffpf { background:#e0e7ff; color:#3730a3; border:1px solid #a5b4fc; }
+
+/* ── Callouts ────────────────────────────────────────────────────── */
+.callout-note .callout-header { background:#d4edda !important; color:#1a3a4a !important; font-weight:600; }
+.callout-note { border-left-color:#2e7d52 !important; }
+
+/* ── TOC ─────────────────────────────────────────────────────────── */
+#TOC { border-right:2px solid #2e7d52; padding-right:1em; }
+#TOC a { color:#1a3a4a; }
+#TOC a:hover { color:#2e7d52; text-decoration:underline; }
+</style>
+```
+
+---
+
+<div class="banner">📋 Study Overview & Statistical Framework</div>
+
+# Study Overview
+
+## What This Document Does
+
+<div class="info-box">
+This pipeline performs genome-wide association analysis (GWAS) on blackberry
+budbreak phenotypes collected over two field seasons, using the `GWASpoly` package
+designed for tetraploid populations. The pipeline runs **80 analyses** organized
+into 10 blocks that systematically vary the genetic cohort, statistical covariate,
+and year to allow cross-validation and discovery of both year-stable and PF-independent
+budbreak QTL.
+</div>
+
+All Manhattan plot PNGs are generated once (interactively) and displayed here on
+render. **Re-rendering does not re-run any GWAS** — plots are loaded from the output
+folder. Only run the generation chunks in RStudio/VSCode, not during render.
+
+## Experimental Material
+
+Two seasons of field data on blackberry budbreak were collected from a diverse
+panel of tetraploid genotypes representing breeding lines and commercial varieties.
+Plants are of two major types based on the primocane-fruiting (PF) major locus:
+
+| Type | Code | Description |
+|------|------|-------------|
+| **Floricane-fruiting** | FF | Standard fruiting habit; carries no PF allele |
+| **Primocane-fruiting** | PF | Carries dominant PF allele; fruits on first-year canes |
+| **Combined panel** | FFPF | All genotypes together |
+
+<div class="warn-box">
+**Why PF status matters for GWAS.** The PF locus is strongly associated with
+budbreak phenotypes — PF genotypes tend to break bud earlier and more extensively.
+If this locus is not accounted for, it will dominate the GWAS signal and mask
+genuine chilling-requirement QTL. We address this two ways: (1) **statistically**,
+by including PF status as a fixed covariate in the model (Blocks A/E/I), and
+(2) **by cohort restriction**, by running GWAS within each type separately so the
+PF locus has no variance to generate signal (Blocks B/C/F/G/J).
+</div>
+
+## Assessment Dates & Phenotypes
+
+Each year, the same plants were assessed at two timepoints representing increasing
+chilling hour accumulation:
+
+| Label | Year 1 Date | Year 2 Date | Approx. Chill Hours |
+|-------|-------------|-------------|---------------------|
+| **T1** (early) | Dec-27-2024 | Jan-1-2026 | Lower accumulation |
+| **T2** (late) | Jan-8-2025 | Jan-30-2026 | Higher accumulation |
+
+Three raw phenotypes were recorded at each timepoint:
+
+| Column | Meaning |
+|--------|---------|
+| Total Buds | Number of buds assessed on each cane |
+| Buds Broken | Count of buds showing visible budbreak |
+| Derived | Fraction = Broken/Total; Percent = 100×Fraction |
+
+## Why No BLUPs?
+
+<div class="warn-box">
+**Double shrinkage problem.** BLUPs (Best Linear Unbiased Predictions) estimate
+genotype effects as *random* — they shrink each genotype's estimate toward the
+population mean. GWASpoly's kinship matrix correction *also* shrinks associations
+toward zero based on genetic relatedness. Stacking these two shrinkage steps can
+suppress genuine QTL signal, particularly for rare alleles and smaller-effect loci.
+BLUEs (Best Linear Unbiased Estimates) treat genotype as *fixed* — no shrinkage —
+and are the appropriate phenotype to pass to a mixed-model GWAS engine like GWASpoly
+that handles population structure internally.
+</div>
+
+## How Multi-Year GWAS Works Here
+
+GWASpoly was designed for a single phenotype vector per genotype. It has no native
+multi-year support. We handle this by **pre-adjusting for year in the phenotype step**:
+
+```
+PERCENT ~ Year + Block + Timepoint + NAME
+```
+
+The coefficient on each `NAME` level is the **year-adjusted BLUE** — a genotypic
+estimate that has been corrected for the systematic mean difference between seasons
+before any genomic analysis. This single corrected value is then passed to GWASpoly
+as the phenotype for combined-year runs (Blocks I/J).
+
+## Run Block Summary
+
+| Block | <span class="badge badge-y1">Year</span> | Cohort | Covariate | Purpose | Runs |
+|-------|------|--------|-----------|---------|------|
+| A | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ffpf">FFPF</span> | PF | PF-independent QTL, Y1 | 1–8 |
+| B | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ff">FF only</span> | None | FF-background QTL, Y1 | 9–16 |
+| C | <span class="badge badge-y1">Y1</span> | <span class="badge badge-pf">PF only</span> | None | PF-background modifiers, Y1 | 17–24 |
+| D | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ffpf">FFPF</span> | None | PF locus test, Y1 | 25–32 |
+| E | <span class="badge badge-y2">Y2</span> | <span class="badge badge-ffpf">FFPF</span> | PF | PF-independent QTL, Y2 | 33–40 |
+| F | <span class="badge badge-y2">Y2</span> | <span class="badge badge-ff">FF only</span> | None | FF-background QTL, Y2 | 41–48 |
+| G | <span class="badge badge-y2">Y2</span> | <span class="badge badge-pf">PF only</span> | None | PF-background modifiers, Y2 | 49–56 |
+| H | <span class="badge badge-y2">Y2</span> | <span class="badge badge-ffpf">FFPF</span> | None | PF locus test, Y2 | 57–64 |
+| I | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ffpf">FFPF</span> | PF | Year-stable, PF-independent QTL | 65–72 |
+| J | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ff">FF only</span> | None | Year-stable FF QTL (highest priority) | 73–80 |
+
+**8 traits per block (FRAC removed — redundant with PERCENT):**
+
+| Trait | Type | Notes |
+|-------|------|-------|
+| `BIN_T1` | Binary | 1 = any budbreak at T1, 0 = none |
+| `BIN_T2` | Binary | 1 = any budbreak at T2, 0 = none |
+| `PERCENT_T1` | Continuous | % buds broken at T1, per-genotype mean |
+| `PERCENT_T2` | Continuous | % buds broken at T2, per-genotype mean |
+| `BLUE_PERCENT` | Adjusted | Block+Timepoint(+Year) fixed-effect BLUE |
+| `COMP_PERCENT` | Composite | Mean of PERCENT_T1 and PERCENT_T2 |
+| `PC1` | PCA score | Major axis of T1/T2 covariation (overall responsiveness) |
+| `PC2` | PCA score | Contrast axis (early vs late budbreak onset timing) |
+
+---
+
+<div class="banner">⚙️ Setup</div>
+
+# Setup
+
+## Packages
+
+```{r packages}
+# Core packages:
+#   tidyverse  — data manipulation and ggplot2
+#   data.table — fast CSV reading for large genotype matrices
+#   GWASpoly   — tetraploid GWAS engine (Rosyara et al. 2016)
+#   lme4       — linear mixed models for BLUP/BLUE estimation
+#   parallel   — multi-core GWAS computation
+
+pkgs <- c("tidyverse", "data.table", "GWASpoly", "stringr", "lme4", "parallel")
+to_install <- pkgs[!pkgs %in% installed.packages()[,"Package"]]
+if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+invisible(lapply(pkgs, library, character.only = TRUE))
+```
+
+## File Paths
+
+```{r paths}
+# ── Input: phenotype CSVs (one per year) ────────────────────────────────────
+y1_pheno_file <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS/Y1_Data_GWAS/Y1_GWAS_Budbreak_Data_Sorted_ForR.csv"
+y2_pheno_file <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS/Y2_Data_GWAS/Y2_GWAS_Budbreak_Data_Sorted_ForR.csv"
+
+# ── Input: tetraploid SNP dosage matrix (UpDog-filtered CaptureSeq) ─────────
+geno_file <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS/captureseq2025_GATK_postmean_70K_updog_filtered.csv"
+
+# ── Output: intermediate per-run phenotype CSVs and GWASpoly score tables ───
+out_dir <- "gwaspoly_runsets"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+# ── Output: Manhattan plot PNGs ───────────────────────────────────────────────
+mp_outdir <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS/GWASCHILL_OUTPUTS"
+dir.create(mp_outdir, showWarnings = FALSE, recursive = TRUE)
+
+cat("[Y1 Pheno ]", y1_pheno_file,
+    "\n[Y2 Pheno ]", y2_pheno_file,
+    "\n[Geno     ]", geno_file,
+    "\n[Run tables]", normalizePath(out_dir, mustWork=FALSE),
+    "\n[PNG output]", normalizePath(mp_outdir, mustWork=FALSE), "\n")
+```
+
+---
+
+<div class="banner">🔧 Helper Functions</div>
+
+# Helper Functions
+
+```{r helpers}
+# ── CSV reader ────────────────────────────────────────────────────────────────
+# Treats blank cells and common "no data" strings as NA.
+# "no cuttings" entries from Y2 missing-rep notation are also treated as NA.
+.read_csv <- function(path) {
+  data.table::fread(path, data.table=FALSE,
+                    na.strings=c("","NA","na","no cuttings","No cuttings","N/A"))
+}
+
+# ── Y1 name extraction ────────────────────────────────────────────────────────
+# Y1 lug ID format: GENOTYPE_fieldrow_fieldcol_BLOCK_rep
+# Examples:
+#   A-2520T_7_7_C_1   →  genotype = A-2520T,  block = C
+#   Osage_1_A_1       →  genotype = Osage,     block = A
+# Strategy: strip final _digit (rep), then strip trailing field coordinates.
+get_name_y1 <- function(x) {
+  x <- stringr::str_trim(x)
+  x <- sub("_\\d+$", "", x)                          # remove rep suffix
+  x <- sub("_\\d+_\\d+_[A-Da-d]$", "", x)            # remove _row_col_block
+  x <- sub("_\\d+_[A-Da-d]$", "", x)                 # remove _col_block
+  x <- sub("_[A-Da-d]$", "", x)                      # remove _block alone
+  x
+}
+get_block_y1 <- function(x) {
+  toupper(stringr::str_extract(x, "[A-Da-d](?=_\\d+$)"))
+}
+
+# ── Y2 name extraction ────────────────────────────────────────────────────────
+# Y2 tag format: SITEPREFIX_GENOTYPE_LrowBLOCK_Pposition
+# Examples:
+#   ANG_A-2958T_L1A_P1     →  genotype = A-2958T,  block = A
+#   WSH_APF-731TN_L1A_P8   →  genotype = APF-731TN, block = A
+#   Osage_L1A_P0           →  genotype = Osage,     block = A
+#   ANG_NC430 (Von)_L1A_P4 →  alias stripped → NC430, block = A
+get_name_y2 <- function(x) {
+  x <- stringr::str_trim(x)
+  x <- sub("^(ANG|NOV|WSH|BEN|BSH)_+", "", x)        # strip site prefix
+  x <- sub("_+L\\d+[A-Da-d]_+P[\\d.]+$", "", x)      # strip field coords
+  x <- sub("\\s*\\([^)]*\\)", "", x)                  # strip aliases e.g. (Von)
+  x <- stringr::str_trim(x)
+  x <- sub("[_ ]+$", "", x)                           # trailing punctuation
+  x
+}
+get_block_y2 <- function(x) {
+  toupper(stringr::str_extract(x, "(?<=L\\d)[A-Da-d](?=_+P)"))
+}
+
+# ── Count clamping ────────────────────────────────────────────────────────────
+# Converts to numeric and enforces 0 ≤ count ≤ total_buds.
+# Guards against data entry errors.
+.clamp <- function(v, maxv) {
+  v    <- suppressWarnings(as.numeric(v))
+  maxv <- suppressWarnings(as.numeric(maxv))
+  pmin(pmax(v, 0, na.rm=FALSE), maxv, na.rm=FALSE)
+}
+
+# ── High-quality PNG saver ────────────────────────────────────────────────────
+# 600 DPI with Cairo renderer for clean anti-aliased text in publication plots.
+save_png_hq <- function(p, filename, w=14, h=8, dpi=600) {
+  ggplot2::ggsave(filename, p, width=w, height=h, dpi=dpi,
+                  units="in", type="cairo-png")
+}
+```
+
+---
+
+<div class="banner">🌱 Phenotype Construction</div>
+
+# Phenotype Construction
+
+## Year 1 Phenotypes (Dec-27-2024 & Jan-8-2025)
+
+```{r y1-pheno}
+# ── Column layout (Y1) ────────────────────────────────────────────────────────
+#   [0] Lug Order (T1)    [1] Position    [2] Total Buds (T1)  [3] Buds Broken (T1)
+#   [4] (blank separator)
+#   [5] Lug Order (T2)    [6] Position    [7] Total Buds (T2)  [8] Buds Broken (T2)
+# Both blocks are the SAME plants assessed at two different dates.
+
+y1_raw <- .read_csv(y1_pheno_file)
+names(y1_raw) <- make.unique(trimws(names(y1_raw)))
+
+# T1 (Dec-27-2024)
+y1_t1 <- y1_raw %>%
+  dplyr::select(Lug=1, TotalBuds=3, Cnt=4) %>%
+  dplyr::filter(!is.na(Lug), Lug != "") %>%
+  dplyr::mutate(
+    NAME      = get_name_y1(Lug),
+    Block     = get_block_y1(Lug),
+    TotalBuds = suppressWarnings(as.numeric(TotalBuds)),
+    Cnt       = .clamp(Cnt, TotalBuds)
+  ) %>%
+  dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
+  dplyr::select(NAME, Block, TotalBuds_T1=TotalBuds, Cnt_T1=Cnt)
+
+# T2 (Jan-8-2025) — same plants
+y1_t2 <- y1_raw %>%
+  dplyr::select(Lug=6, TotalBuds=8, Cnt=9) %>%
+  dplyr::filter(!is.na(Lug), Lug != "") %>%
+  dplyr::mutate(
+    NAME      = get_name_y1(Lug),
+    TotalBuds = suppressWarnings(as.numeric(TotalBuds)),
+    Cnt       = .clamp(Cnt, TotalBuds)
+  ) %>%
+  dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
+  dplyr::select(NAME, TotalBuds_T2=TotalBuds, Cnt_T2=Cnt)
+
+# Join and derive traits
+y1_long <- dplyr::full_join(y1_t1, y1_t2, by="NAME") %>%
+  dplyr::mutate(
+    PERCENT_T1 = 100 * Cnt_T1 / TotalBuds_T1,
+    PERCENT_T2 = 100 * Cnt_T2 / TotalBuds_T2,
+    BIN_T1     = as.integer(Cnt_T1 > 0),
+    BIN_T2     = as.integer(Cnt_T2 > 0),
+    Year       = "Y1"
+  )
+
+cat("[Y1] Genotypes:", n_distinct(y1_long$NAME),
+    "| T1 obs:", sum(!is.na(y1_long$PERCENT_T1)),
+    "| T2 obs:", sum(!is.na(y1_long$PERCENT_T2)), "\n")
+```
+
+## Year 2 Phenotypes (Jan-1-2026 & Jan-30-2026)
+
+```{r y2-pheno}
+# ── Column layout (Y2) ────────────────────────────────────────────────────────
+#   [0] Tag Label (T1)   [1] Total Buds (T1)   [2] Position   [3] Buds Broken (T1)
+#   [4] (blank separator)
+#   [5] Tag Label (T2)   [6] Total Buds (T2)   [7] Position   [8] Buds Broken (T2)
+# Y2 tag format: SITEPREFIX_GENOTYPE_LrowBLOCK_Pposition
+
+y2_raw <- .read_csv(y2_pheno_file)
+names(y2_raw) <- make.unique(trimws(names(y2_raw)))
+
+# T1 (Jan-1-2026)
+y2_t1 <- y2_raw %>%
+  dplyr::select(Tag=1, TotalBuds=2, Cnt=4) %>%
+  dplyr::filter(!is.na(Tag), Tag != "") %>%
+  dplyr::mutate(
+    NAME      = get_name_y2(Tag),
+    Block     = get_block_y2(Tag),
+    TotalBuds = suppressWarnings(as.numeric(TotalBuds)),
+    Cnt       = .clamp(Cnt, TotalBuds)
+  ) %>%
+  dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
+  dplyr::select(NAME, Block, TotalBuds_T1=TotalBuds, Cnt_T1=Cnt)
+
+# T2 (Jan-30-2026) — Y2 now has its own Total Buds column for T2
+y2_t2 <- y2_raw %>%
+  dplyr::select(Tag=6, TotalBuds=7, Cnt=9) %>%
+  dplyr::filter(!is.na(Tag), Tag != "") %>%
+  dplyr::mutate(
+    NAME      = get_name_y2(Tag),
+    TotalBuds = suppressWarnings(as.numeric(TotalBuds)),
+    Cnt       = .clamp(Cnt, TotalBuds)
+  ) %>%
+  dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
+  dplyr::select(NAME, TotalBuds_T2=TotalBuds, Cnt_T2=Cnt)
+
+y2_long <- dplyr::full_join(y2_t1, y2_t2, by="NAME") %>%
+  dplyr::mutate(
+    PERCENT_T1 = 100 * Cnt_T1 / TotalBuds_T1,
+    PERCENT_T2 = 100 * Cnt_T2 / TotalBuds_T2,
+    BIN_T1     = as.integer(Cnt_T1 > 0),
+    BIN_T2     = as.integer(Cnt_T2 > 0),
+    Year       = "Y2"
+  )
+
+cat("[Y2] Genotypes:", n_distinct(y2_long$NAME),
+    "| T1 obs:", sum(!is.na(y2_long$PERCENT_T1)),
+    "| T2 obs:", sum(!is.na(y2_long$PERCENT_T2)), "\n")
+```
+
+## PF Status Assignment
+
+```{r pf-assignment}
+# ── PF classification rules ───────────────────────────────────────────────────
+# APF prefix  → PF=1 (primocane-fruiting breeding lines)
+# A- prefix   → PF=0 (floricane-fruiting breeding lines)
+# NC430       → PF=0 (selection number for the variety Von, confirmed FF)
+# Named varieties assigned individually based on known biology.
+# Anything unclassified prints a warning so it can be added manually.
+
+all_names <- union(unique(y1_long$NAME), unique(y2_long$NAME))
+
+PF_tbl <- tibble::tibble(NAME = all_names) %>%
+  dplyr::mutate(
+    PF = dplyr::case_when(
+      startsWith(NAME, "APF")   ~ 1L,
+      startsWith(NAME, "A-")    ~ 0L,
+      NAME == "NC430"           ~ 0L,   # selection number for Von (FF)
+      NAME %in% c("PrimeArkFreedom","PrimeArkHorizon","Superlicious") ~ 1L,
+      NAME %in% c("Osage","Ouachita","Natchez","Apache","Ponca","Caddo",
+                  "Navaho","Lochness","Immaculate","Von","Tupy","Stella",
+                  "Thunderhead","Celestial","Twilight") ~ 0L,
+      TRUE ~ NA_integer_
+    )
+  )
+
+cat("[PF] PF=1:", sum(PF_tbl$PF==1, na.rm=TRUE),
+    "| PF=0:", sum(PF_tbl$PF==0, na.rm=TRUE),
+    "| PF=NA (unclassified):", sum(is.na(PF_tbl$PF)), "\n")
+
+unclass <- dplyr::filter(PF_tbl, is.na(PF))$NAME
+if (length(unclass) > 0) {
+  warning("[PF] Unclassified genotypes — add to case_when above: ",
+          paste(unclass, collapse=", "))
+}
+```
+
+## BLUE Estimation (Per-Year & Combined)
+
+<div class="stat-box">
+**BLUE model: `PERCENT ~ Block + Timepoint + NAME`**
+
+Block captures spatial field variation (blocks A–D within each trial).
+Timepoint captures the systematic increase in budbreak across assessment dates —
+not a biological genotype effect, just the progression of the season.
+The NAME coefficient is the BLUE for each genotype: the estimated mean budbreak
+percentage after accounting for both sources of non-genetic variation, with no
+shrinkage toward the population mean.
+
+For the combined-year model, `Year` is added as an additional fixed effect to
+absorb the mean difference between the 2024–25 and 2025–26 seasons before
+estimating genotypic effects.
+</div>
+
+```{r blue-models}
+# ── BLUE helper: fits the fixed-effects model and extracts NAME coefficients ──
+compute_blue <- function(df_wide, label) {
+  long <- df_wide %>%
+    dplyr::select(NAME, Block, PERCENT_T1, PERCENT_T2) %>%
+    tidyr::pivot_longer(c(PERCENT_T1, PERCENT_T2),
+                        names_to="Timepoint", values_to="PERCENT") %>%
+    dplyr::filter(!is.na(PERCENT), is.finite(PERCENT)) %>%
+    dplyr::mutate(NAME=factor(NAME), Block=factor(Block), Timepoint=factor(Timepoint))
+
+  cat("[BLUE", label, "] obs:", nrow(long),
+      "| genotypes:", n_distinct(long$NAME), "\n")
+
+  mod <- tryCatch(
+    lm(PERCENT ~ Block + Timepoint + NAME, data=long),
+    error=function(e) {
+      message("[BLUE", label, " FALLBACK] Using means. ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  if (!is.null(mod)) {
+    co  <- coef(mod)
+    val <- co[grepl("^NAME", names(co))]
+    tibble::tibble(NAME=gsub("^NAME","",names(val)), BLUE_PERCENT=as.numeric(val))
+  } else {
+    long %>% dplyr::group_by(NAME) %>%
+      dplyr::summarise(BLUE_PERCENT=mean(PERCENT, na.rm=TRUE), .groups="drop")
+  }
+}
+
+blue_y1 <- compute_blue(y1_long, "Y1")
+blue_y2 <- compute_blue(y2_long, "Y2")
+
+# ── Combined-year BLUE ────────────────────────────────────────────────────────
+# Year added as fixed effect. This absorbs systematic season differences
+# (e.g. one year having higher overall budbreak) before estimating genotype means.
+comb_long <- dplyr::bind_rows(
+    y1_long %>% dplyr::select(NAME, Block, PERCENT_T1, PERCENT_T2, Year),
+    y2_long %>% dplyr::select(NAME, Block, PERCENT_T1, PERCENT_T2, Year)
+  ) %>%
+  tidyr::pivot_longer(c(PERCENT_T1, PERCENT_T2),
+                      names_to="Timepoint", values_to="PERCENT") %>%
+  dplyr::filter(!is.na(PERCENT), is.finite(PERCENT)) %>%
+  dplyr::mutate(NAME=factor(NAME), Block=factor(Block),
+                Year=factor(Year),  Timepoint=factor(Timepoint))
+
+cat("[BLUE Combined] obs:", nrow(comb_long),
+    "| genotypes:", n_distinct(comb_long$NAME), "\n")
+
+mod_comb <- tryCatch(
+  lm(PERCENT ~ Year + Block + Timepoint + NAME, data=comb_long),
+  error=function(e) { message("[BLUE Combined FAIL] ", conditionMessage(e)); NULL }
+)
+
+if (!is.null(mod_comb)) {
+  co  <- coef(mod_comb)
+  val <- co[grepl("^NAME", names(co))]
+  blue_comb <- tibble::tibble(NAME=gsub("^NAME","",names(val)),
+                               BLUE_PERCENT=as.numeric(val))
+} else {
+  blue_comb <- comb_long %>% dplyr::group_by(NAME) %>%
+    dplyr::summarise(BLUE_PERCENT=mean(PERCENT, na.rm=TRUE), .groups="drop")
+}
+cat("[BLUE Combined] genotypes with estimate:", nrow(blue_comb), "\n")
+```
+
+## Composite Traits & Phenotypic PCA
+
+```{r pca-traits}
+# ── PCA helper ────────────────────────────────────────────────────────────────
+# Computes per-genotype means, COMP_PERCENT, and PC1/PC2 from a long table.
+# PC1 typically captures overall chilling responsiveness (high PERCENT at both
+# timepoints). PC2 typically captures the early-vs-late contrast (high T1 but
+# low T2 relative to others, or vice versa) — i.e. timing of budbreak onset.
+make_trait_table <- function(df_long, label) {
+  means <- df_long %>%
+    dplyr::group_by(NAME) %>%
+    dplyr::summarise(
+      across(c(BIN_T1, BIN_T2, PERCENT_T1, PERCENT_T2),
+             \(x) mean(x, na.rm=TRUE)),
+      .groups="drop"
+    ) %>%
+    dplyr::mutate(
+      COMP_PERCENT = rowMeans(cbind(PERCENT_T1, PERCENT_T2), na.rm=TRUE)
+    )
+
+  pca_in <- means %>%
+    dplyr::filter(complete.cases(dplyr::select(., PERCENT_T1, PERCENT_T2)))
+
+  pca_mat <- scale(pca_in %>% dplyr::select(PERCENT_T1, PERCENT_T2))
+  pca_res <- prcomp(pca_mat, center=FALSE, scale.=FALSE)
+  var_exp <- summary(pca_res)$importance["Proportion of Variance",]
+  cat("[PCA", label, "] PC1:", round(var_exp[1]*100,1),
+      "% | PC2:", round(var_exp[2]*100,1), "%\n")
+
+  scores <- tibble::tibble(NAME=pca_in$NAME,
+                           PC1=pca_res$x[,1],
+                           PC2=pca_res$x[,2])
+  dplyr::left_join(means, scores, by="NAME")
+}
+
+traits_y1   <- make_trait_table(y1_long,                         "Y1")
+traits_y2   <- make_trait_table(y2_long,                         "Y2")
+traits_comb <- make_trait_table(dplyr::bind_rows(y1_long,y2_long),"Combined")
+```
+
+## Master Phenotype Tables
+
+```{r master-pheno}
+# ── Assemble per-year and combined master tables ──────────────────────────────
+# Each master table has one row per genotype and all 10 trait columns.
+# PF status is joined last so cohort subsetting works downstream.
+make_master <- function(traits_tbl, blue_tbl, pf_tbl) {
+  traits_tbl %>%
+    dplyr::left_join(blue_tbl %>% dplyr::select(NAME, BLUE_PERCENT), by="NAME") %>%
+    dplyr::left_join(pf_tbl, by="NAME")
+}
+
+PH_Y1   <- make_master(traits_y1,   blue_y1,   PF_tbl)
+PH_Y2   <- make_master(traits_y2,   blue_y2,   PF_tbl)
+PH_COMB <- make_master(traits_comb, blue_comb, PF_tbl)
+
+cat("[PH_Y1  ] genotypes:", nrow(PH_Y1),
+    "| PF=1:", sum(PH_Y1$PF==1, na.rm=TRUE),
+    "| PF=0:", sum(PH_Y1$PF==0, na.rm=TRUE), "\n")
+cat("[PH_Y2  ] genotypes:", nrow(PH_Y2),
+    "| PF=1:", sum(PH_Y2$PF==1, na.rm=TRUE),
+    "| PF=0:", sum(PH_Y2$PF==0, na.rm=TRUE), "\n")
+cat("[PH_COMB] genotypes:", nrow(PH_COMB),
+    "| PF=1:", sum(PH_COMB$PF==1, na.rm=TRUE),
+    "| PF=0:", sum(PH_COMB$PF==0, na.rm=TRUE), "\n")
+```
+
+---
+
+<div class="banner">🧬 Genotype Harmonization</div>
+
+# Genotype Harmonization
+
+<div class="stat-box">
+The genotype file (CaptureSeq SNP dosage matrix, UpDog-filtered) and the phenotype
+files were produced by different pipelines and may have minor differences in sample
+ID formatting (e.g. underscores vs hyphens, capitalisation). Both sets of names are
+normalised to a canonical uppercase-no-punctuation form before matching, then column
+names in the genotype matrix are renamed to exactly match the phenotype NAMEs so
+GWASpoly's internal join works correctly.
+
+**Genotypes with no marker data are automatically excluded** — the final sample list
+is the intersection of phenotyped and genotyped individuals.
+</div>
+
+```{r geno-harmonize}
+# ── Load genotype matrix ──────────────────────────────────────────────────────
+# Format: rows = SNP markers; cols = samples + 3 header cols (marker, chrom, pos)
+# Values: allele dosage 0–4 (tetraploid UpDog calls)
+cat("[GENO] Reading genotype matrix — this may take a moment...\n")
+G <- data.table::fread(geno_file)
+names(G)[1:3] <- c("marker","chrom","pos")
+geno_samples <- setdiff(names(G), c("marker","chrom","pos"))
+cat("[GENO] Markers:", nrow(G), "| Genotyped samples:", length(geno_samples), "\n")
+
+# ── Normalise IDs for fuzzy matching ─────────────────────────────────────────
+# Strips hyphens, underscores, spaces; converts to uppercase
+norm_id <- function(x) toupper(gsub("[-_ ]","", stringr::str_trim(x)))
+
+all_pheno <- unique(c(PH_Y1$NAME, PH_Y2$NAME, PH_COMB$NAME))
+
+geno_map  <- tibble::tibble(orig=geno_samples, key=norm_id(geno_samples))
+pheno_map <- tibble::tibble(NAME=all_pheno,    key=norm_id(all_pheno))
+
+join_map <- dplyr::inner_join(geno_map, pheno_map, by="key")
+cat("[GENO-HARM] Phenotyped:", length(all_pheno),
+    "| Genotyped:", length(geno_samples),
+    "| Overlap:", nrow(join_map), "\n")
+
+not_genotyped <- setdiff(norm_id(all_pheno), geno_map$key)
+cat("[GENO-HARM]", length(not_genotyped),
+    "phenotyped genotypes have NO marker data yet — excluded from all GWAS runs.\n")
+
+if (nrow(join_map) < 20)
+  stop("FATAL: fewer than 20 overlapping samples. Check ID formats.")
+
+# ── Rename geno columns to match phenotype NAMEs exactly ─────────────────────
+for (i in seq_len(nrow(join_map))) {
+  data.table::setnames(G, old=join_map$orig[i], new=join_map$NAME[i])
+}
+
+final_samples <- intersect(setdiff(names(G), c("marker","chrom","pos")), all_pheno)
+cat("[GENO-HARM] Final usable samples:", length(final_samples), "\n")
+
+G_sub    <- G[, c("marker","chrom","pos", final_samples), with=FALSE]
+geno_out <- file.path(out_dir, "geno_numeric_tetra.csv")
+data.table::fwrite(G_sub, geno_out)
+cat("[GENO-HARM] Harmonised genotype file written.\n")
+```
+
+## Genotypes Without Marker Data
+
+<div class="warn-box">
+The table below lists every genotype that appears in the phenotype files but was
+**not found** in the genotype matrix. These plants will be excluded from all GWAS
+runs. Review this list to identify: (a) genotypes that are correctly absent because
+they haven't been genotyped yet, and (b) any genotypes that may have been excluded
+due to a name mismatch or formatting difference between the phenotype and genotype files.
+If a name looks like it should be in the marker file, check the raw column headers
+in the genotype CSV for formatting differences (extra spaces, hyphens vs underscores, etc.).
+</div>
+
+```{r missing-genotypes}
+# All phenotyped genotypes that did not match any sample in the genotype matrix
+norm_id <- function(x) toupper(gsub("[-_ ]", "", stringr::str_trim(x)))
+
+matched_pheno_names <- join_map$NAME   # phenotype NAMEs that found a geno match
+
+not_genotyped_tbl <- tibble::tibble(
+  Genotype = sort(setdiff(all_pheno, matched_pheno_names))
+) %>%
+  dplyr::mutate(
+    PF_Status = dplyr::left_join(
+      tibble::tibble(NAME = Genotype), PF_tbl, by = "NAME"
+    )$PF,
+    PF_Label = dplyr::case_when(
+      PF_Status == 1L ~ "PF (primocane-fruiting)",
+      PF_Status == 0L ~ "FF (floricane-fruiting)",
+      TRUE            ~ "Unclassified"
+    ),
+    In_Y1 = Genotype %in% PH_Y1$NAME,
+    In_Y2 = Genotype %in% PH_Y2$NAME
+  ) %>%
+  dplyr::select(Genotype, PF_Label, In_Y1, In_Y2)
+
+cat("[MISSING-GENO]", nrow(not_genotyped_tbl),
+    "phenotyped genotypes have no marker data and are excluded from GWAS.\n")
+
+knitr::kable(
+  not_genotyped_tbl,
+  col.names = c("Genotype", "PF Status", "In Y1", "In Y2"),
+  caption   = paste0(
+    "Genotypes present in phenotype files but absent from the marker matrix — ",
+    "excluded from all GWAS runs. Listed in alphanumeric order. ",
+    "Review for potential name mismatches vs. not-yet-genotyped entries."
+  )
+)
+```
+
+---
+
+<div class="banner">📐 Run Configuration</div>
+
+# Run Configuration
+
+```{r run-config}
+# ── Trait list ────────────────────────────────────────────────────────────────
+TRAITS <- c("BIN_T1","BIN_T2","PERCENT_T1","PERCENT_T2",
+            "BLUE_PERCENT","COMP_PERCENT","PC1","PC2")
+
+# ── Block definitions ─────────────────────────────────────────────────────────
+blocks <- tibble::tribble(
+  ~Block, ~Cohort, ~Covariate, ~Dataset, ~Start,
+  "A",  "FFPF", "PF",   "Y1",       1,
+  "B",  "FF",   "None", "Y1",      11,
+  "C",  "PF",   "None", "Y1",      21,
+  "D",  "FFPF", "None", "Y1",      31,
+  "E",  "FFPF", "PF",   "Y2",      41,
+  "F",  "FF",   "None", "Y2",      51,
+  "G",  "PF",   "None", "Y2",      61,
+  "H",  "FFPF", "None", "Y2",      71,
+  "I",  "FFPF", "PF",   "Combined",81,
+  "J",  "FF",   "None", "Combined",91
+)
+
+# ── Expand into full 100-run table ────────────────────────────────────────────
+run_config <- blocks %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(Traits=list(TRAITS)) %>%
+  tidyr::unnest(Traits) %>%
+  dplyr::rename(Trait=Traits) %>%
+  dplyr::mutate(
+    run_id = Start + match(Trait, TRAITS) - 1,
+    Transformation = dplyr::case_when(
+      startsWith(Trait,"BIN")     ~ "Binary (any budbreak)",
+      startsWith(Trait,"PERCENT") ~ "Percent (0-100), per-genotype mean",
+      Trait=="BLUE_PERCENT"       ~ "BLUE: Block+Timepoint(+Year)-adjusted, no shrinkage",
+      Trait=="COMP_PERCENT"       ~ "Composite: mean of both timepoints",
+      Trait %in% c("PC1","PC2")  ~ "Phenotypic PCA score"
+    )
+  ) %>%
+  dplyr::select(run_id, Block, Cohort, Covariate, Dataset, Trait, Transformation)
+
+knitr::kable(run_config,
+             caption="100-run GWAS configuration — all blocks and traits (BLUP excluded)")
+
+# ── Cohort filter function ────────────────────────────────────────────────────
+# Returns the correct subset of the master phenotype table for a given run.
+get_cohort_df <- function(dataset, cohort) {
+  ph <- switch(dataset,
+    "Y1"       = PH_Y1,
+    "Y2"       = PH_Y2,
+    "Combined" = PH_COMB,
+    stop("Unknown dataset: ", dataset)
+  )
+  switch(cohort,
+    "FFPF" = dplyr::filter(ph, !is.na(PF)),
+    "FF"   = dplyr::filter(ph, !is.na(PF), PF==0),
+    "PF"   = dplyr::filter(ph, !is.na(PF), PF==1),
+    stop("Unknown cohort: ", cohort)
+  )
+}
+```
+
+---
+
+<div class="banner">🔬 GWAS Engine</div>
+
+# GWAS Engine
+
+```{r gwas-function}
+# ── run_gwas_single() ─────────────────────────────────────────────────────────
+# Runs one complete GWAS analysis:
+#   1. Pulls cohort + trait from run_config
+#   2. Safety checks (trait exists, n ≥ 20)
+#   3. Writes a per-run phenotype CSV for GWASpoly
+#   4. read.GWASpoly() — loads pheno + geno, ploidy=4, dosage format
+#   5. set.K() with LOCO=TRUE — kinship matrix excluding the focal chromosome
+#      (prevents the causal chromosome from suppressing its own signal)
+#   6. GWASpoly() — tests additive, 1-dom, 2-dom, general models at every marker
+#   7. set.threshold() — M.eff multiple-testing correction at α=0.05
+#   8. Saves score table, QTL table, and Manhattan plot PNG
+#
+# force=FALSE: skips the run if its PNG already exists (default — safe to call)
+# force=TRUE:  regenerates even if PNG exists
+
+run_gwas_single <- function(run_id, force=FALSE) {
+
+  cfg <- dplyr::filter(run_config, run_id == !!run_id)
+  if (nrow(cfg)==0) { message("[SKIP] Run ", run_id, " not in config."); return(invisible(NULL)) }
+
+  trait <- cfg$Trait
+  cov   <- cfg$Covariate
+
+  png_path <- file.path(mp_outdir,
+    paste0(sprintf("%03d", run_id), "__", cfg$Block, "__", cfg$Dataset,
+           "__", cfg$Cohort, "__", trait, ".png"))
+
+  if (file.exists(png_path) && !force) {
+    message("[SKIP] Run ", sprintf("%03d", run_id), " PNG exists. Pass force=TRUE to rerun.")
+    return(invisible(NULL))
+  }
+
+  df <- get_cohort_df(cfg$Dataset, cfg$Cohort)
+
+  if (!trait %in% names(df)) {
+    message("[SKIP] Trait '", trait, "' missing from master table. Run ", run_id)
+    return(invisible(NULL))
+  }
+
+  n_obs <- sum(!is.na(df[[trait]]))
+  if (n_obs < 20) {
+    message("[SKIP] Only ", n_obs, " obs for '", trait, "' in run ", run_id, " — too few.")
+    return(invisible(NULL))
+  }
+
+  # Write per-run phenotype CSV
+  df_use <- if (cov=="PF") {
+    df %>% dplyr::select(NAME, dplyr::all_of(trait), PF) %>%
+      dplyr::filter(!is.na(.data[[trait]]))
+  } else {
+    df %>% dplyr::select(NAME, dplyr::all_of(trait)) %>%
+      dplyr::filter(!is.na(.data[[trait]]))
+  }
+
+  pheno_out <- file.path(out_dir, paste0("pheno_run", sprintf("%03d", run_id), ".csv"))
+  data.table::fwrite(df_use, pheno_out)
+
+  # GWASpoly pipeline
+  data_gp <- GWASpoly::read.GWASpoly(
+    ploidy=4, pheno.file=pheno_out, geno.file=geno_out,
+    format="numeric", n.traits=ncol(df_use)-1
+  )
+
+  data_gp <- GWASpoly::set.K(data_gp, LOCO=TRUE)
+
+  params <- if (cov=="PF") {
+    GWASpoly::set.params(fixed="PF", fixed.type="factor")
+  } else {
+    GWASpoly::set.params()
+  }
+
+  fit <- GWASpoly::GWASpoly(
+    data=data_gp, traits=trait,
+    models=c("additive","1-dom","2-dom","general"),
+    params=params,
+    n.core=max(1L, parallel::detectCores()-1L)
+  )
+
+  thr <- GWASpoly::set.threshold(fit, method="M.eff", level=0.05)
+
+  # Save score table and QTL peaks
+  base <- file.path(out_dir,
+    paste0("run", sprintf("%03d", run_id), "_", cfg$Block, "_", trait))
+  GWASpoly::write.GWASpoly(thr, trait=trait,
+    filename=paste0(base, "_scores.csv"), what="scores")
+  qtl <- GWASpoly::get.QTL(thr, traits=trait, models="additive", bp.window=5e6)
+  data.table::fwrite(qtl, paste0(base, "_QTL.csv"))
+
+  # Save Manhattan plot
+  p <- GWASpoly::manhattan.plot(thr, traits=trait) +
+    ggplot2::ggtitle(
+      label    = paste0("Run ", sprintf("%03d", run_id),
+                        " | Block ", cfg$Block,
+                        " | ", cfg$Dataset, " | Cohort: ", cfg$Cohort,
+                        " | Trait: ", trait),
+      subtitle = paste0(cfg$Transformation,
+                        if (cov!="None") paste0(" | Covariate: ", cov) else "")
+    ) +
+    ggplot2::theme(plot.title    = ggplot2::element_text(size=13, face="bold"),
+                   plot.subtitle = ggplot2::element_text(size=11, color="grey40"))
+
+  save_png_hq(p, png_path)
+  message("[DONE] Run ", sprintf("%03d", run_id),
+          " | Block ", cfg$Block, " | ", cfg$Dataset, " | ", trait,
+          "\n  →  ", png_path)
+}
+```
+
+---
+
+<div class="banner">🚀 Generate Manhattan Plots</div>
+
+# Generate Manhattan Plots
+
+<div class="warn-box">
+⚠️ **Run these chunks interactively in RStudio or VSCode — NOT during document render.**
+Each run takes roughly 30–90 minutes depending on machine and marker density (80 runs total).
+Once all PNGs are saved to the output folder, render the document normally to display them.
+</div>
+
+## Run All 100 Plots
+
+```{r generate-all, eval=FALSE}
+# ── Generate all 80 runs fresh ─────────────────────────────────────────────────
+# run_gwas_single() skips by default if a PNG already exists.
+# Use force=TRUE to regenerate a specific run.
+
+for (i in run_config$run_id) {
+  run_gwas_single(i)
+}
+```
+
+## Run Only Missing Plots
+
+```{r run-missing-manhattan-plots, eval=FALSE}
+# ── run_missing_manhattan_plots() ─────────────────────────────────────────────
+# Scans the output folder, identifies runs whose PNG does not yet exist,
+# and runs only those. Safe to call at any time — completed runs are skipped.
+
+run_missing_manhattan_plots <- function() {
+
+  status <- run_config %>%
+    dplyr::rowwise() %>%
+    dplyr::mutate(
+      png_path = file.path(
+        mp_outdir,
+        paste0(sprintf("%03d", run_id), "__", Block, "__", Dataset,
+               "__", Cohort, "__", Trait, ".png")
+      ),
+      exists = file.exists(png_path)
+    ) %>%
+    dplyr::ungroup()
+
+  done    <- dplyr::filter(status,  exists)
+  missing <- dplyr::filter(status, !exists)
+
+  cat("[STATUS]", nrow(done), "runs complete |", nrow(missing), "runs missing\n\n")
+
+  if (nrow(missing)==0) {
+    message("[OK] All 100 Manhattan plots already exist."); return(invisible(NULL))
+  }
+
+  cat("Missing runs:\n")
+  print(missing %>% dplyr::select(run_id, Block, Cohort, Dataset, Trait))
+
+  for (i in missing$run_id) {
+    message("\n[RUNNING] Run ", sprintf("%03d", i))
+    run_gwas_single(i)
+  }
+
+  message("\n[COMPLETE] All missing plots generated.")
+}
+
+# ── Call it ───────────────────────────────────────────────────────────────────
+run_missing_manhattan_plots()
+```
+
+## Run a Single Block
+
+```{r run-one-block, eval=FALSE}
+# Run a specific block by letter:
+run_block <- function(block_letter) {
+  ids <- dplyr::filter(run_config, Block==block_letter)$run_id
+  for (i in ids) run_gwas_single(i)
+}
+
+# Examples:
+# run_block("A")    # Year 1, FFPF + PF covariate
+# run_block("I")    # Combined years, FFPF + PF covariate
+# run_gwas_single(81, force=TRUE)  # regenerate a single run
+```
+
+---
+
+<div class="banner">📊 Results — Manhattan Plots</div>
+
+# Results — Manhattan Plots
+
+```{r display-helper, include=FALSE}
+# show_manhattan(): loads and displays the PNG for a given run ID.
+# Prints a placeholder message if the plot hasn't been generated yet.
+show_manhattan <- function(run_id) {
+  cfg <- dplyr::filter(run_config, run_id == !!run_id)
+  if (nrow(cfg)==0) { cat("> Run", run_id, "not found.\n\n"); return(invisible()) }
+  png_path <- file.path(mp_outdir,
+    paste0(sprintf("%03d", run_id), "__", cfg$Block, "__", cfg$Dataset,
+           "__", cfg$Cohort, "__", cfg$Trait, ".png"))
+  if (file.exists(png_path)) {
+    knitr::include_graphics(png_path)
+  } else {
+    cat("> ⚠️  **Plot not yet generated.**",
+        "Run `run_gwas_single(", run_id, ")` then re-render.\n\n")
+  }
+}
+```
+
+---
+
+<div class="banner-y1">📅 Year 1 Results (Dec-27-2024 & Jan-8-2025)</div>
+
+## Block A — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 1–8) {#block-a}
+
+<div class="stat-box">
+**Purpose:** Identify budbreak QTL that are *independent* of the PF major locus.
+PF status is included as a fixed covariate, so the PF locus variance is removed
+from the scan before testing all other markers. Signals here that also appear in
+Block D (no covariate) are confirmed PF-independent loci and the highest-priority
+candidates for genuine chilling-requirement QTL.
+</div>
+
+::: {.callout-note collapse="true" title="Run 001 | Y1 | FFPF | BIN_T1 (Dec-27-2024 binary) | Cov: PF"}
+```{r p001, echo=FALSE, out.width="100%"} 
+show_manhattan(1)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 002 | Y1 | FFPF | BIN_T2 (Jan-8-2025 binary) | Cov: PF"}
+```{r p002, echo=FALSE, out.width="100%"}
+show_manhattan(2)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 003 | Y1 | FFPF | PERCENT_T1 (Dec-27) | Cov: PF"}
+```{r p003, echo=FALSE, out.width="100%"}
+show_manhattan(3)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 004 | Y1 | FFPF | PERCENT_T2 (Jan-8) | Cov: PF"}
+```{r p004, echo=FALSE, out.width="100%"}
+show_manhattan(4)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 005 | Y1 | FFPF | BLUE_PERCENT (block+timepoint adjusted) | Cov: PF"}
+```{r p005, echo=FALSE, out.width="100%"}
+show_manhattan(5)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 006 | Y1 | FFPF | COMP_PERCENT (mean of T1+T2) | Cov: PF"}
+```{r p006, echo=FALSE, out.width="100%"}
+show_manhattan(6)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 007 | Y1 | FFPF | PC1 (overall responsiveness) | Cov: PF"}
+```{r p007, echo=FALSE, out.width="100%"}
+show_manhattan(7)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 008 | Y1 | FFPF | PC2 (early vs late contrast) | Cov: PF"}
+```{r p008, echo=FALSE, out.width="100%"}
+show_manhattan(8)
+```
+:::
+
+---
+
+## Block B — <span class="badge badge-y1">Y1</span> <span class="badge badge-ff">FF Only</span> (Runs 9–16) {#block-b}
+
+<div class="stat-box">
+**Purpose:** Map budbreak QTL within the FF genetic background only. The PF locus
+has zero variance in this cohort (all plants are PF=0) so it cannot generate signal
+regardless of statistical modelling. Any QTL detected here operates within the
+floricane-fruiting background.
+</div>
+
+::: {.callout-note collapse="true" title="Run 009 | Y1 | FF | BIN_T1"}
+```{r p009, echo=FALSE, out.width="100%"}
+show_manhattan(9)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 010 | Y1 | FF | BIN_T2"}
+```{r p010, echo=FALSE, out.width="100%"}
+show_manhattan(10)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 011 | Y1 | FF | PERCENT_T1"}
+```{r p011, echo=FALSE, out.width="100%"}
+show_manhattan(11)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 012 | Y1 | FF | PERCENT_T2"}
+```{r p012, echo=FALSE, out.width="100%"}
+show_manhattan(12)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 013 | Y1 | FF | BLUE_PERCENT"}
+```{r p013, echo=FALSE, out.width="100%"}
+show_manhattan(13)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 014 | Y1 | FF | COMP_PERCENT"}
+```{r p014, echo=FALSE, out.width="100%"}
+show_manhattan(14)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 015 | Y1 | FF | PC1"}
+```{r p015, echo=FALSE, out.width="100%"}
+show_manhattan(15)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 016 | Y1 | FF | PC2"}
+```{r p016, echo=FALSE, out.width="100%"}
+show_manhattan(16)
+```
+:::
+
+---
+
+## Block C — <span class="badge badge-y1">Y1</span> <span class="badge badge-pf">PF Only</span> (Runs 17–24) {#block-c}
+
+<div class="stat-box">
+**Purpose:** Identify budbreak modifier loci acting *within* the PF genetic background.
+All individuals share the PF allele, so the PF locus has no variance. Hits here are
+QTL that modulate chilling response specifically among PF genotypes — useful for
+understanding epistasis with the PF locus.
+</div>
+
+::: {.callout-note collapse="true" title="Run 017 | Y1 | PF | BIN_T1"}
+```{r p017, echo=FALSE, out.width="100%"}
+show_manhattan(17)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 018 | Y1 | PF | BIN_T2"}
+```{r p018, echo=FALSE, out.width="100%"}
+show_manhattan(18)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 019 | Y1 | PF | PERCENT_T1"}
+```{r p019, echo=FALSE, out.width="100%"}
+show_manhattan(19)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 020 | Y1 | PF | PERCENT_T2"}
+```{r p020, echo=FALSE, out.width="100%"}
+show_manhattan(20)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 021 | Y1 | PF | BLUE_PERCENT"}
+```{r p021, echo=FALSE, out.width="100%"}
+show_manhattan(21)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 022 | Y1 | PF | COMP_PERCENT"}
+```{r p022, echo=FALSE, out.width="100%"}
+show_manhattan(22)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 023 | Y1 | PF | PC1"}
+```{r p023, echo=FALSE, out.width="100%"}
+show_manhattan(23)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 024 | Y1 | PF | PC2"}
+```{r p024, echo=FALSE, out.width="100%"}
+show_manhattan(24)
+```
+:::
+
+---
+
+## Block D — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> No Covariate / PF Locus Test (Runs 25–32) {#block-d}
+
+<div class="stat-box">
+**Purpose:** Let the PF locus appear freely in the scan. Compare with Block A:
+peaks that appear here but disappear when PF is added as covariate (Block A) are
+driven by or confounded with the PF locus. Peaks present in *both* blocks are
+confirmed PF-independent budbreak QTL.
+</div>
+
+::: {.callout-note collapse="true" title="Run 025 | Y1 | FFPF | BIN_T1 | No covariate"}
+```{r p025, echo=FALSE, out.width="100%"}
+show_manhattan(25)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 026 | Y1 | FFPF | BIN_T2 | No covariate"}
+```{r p026, echo=FALSE, out.width="100%"}
+show_manhattan(26)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 027 | Y1 | FFPF | PERCENT_T1 | No covariate"}
+```{r p027, echo=FALSE, out.width="100%"}
+show_manhattan(27)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 028 | Y1 | FFPF | PERCENT_T2 | No covariate"}
+```{r p028, echo=FALSE, out.width="100%"}
+show_manhattan(28)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 029 | Y1 | FFPF | BLUE_PERCENT | No covariate"}
+```{r p029, echo=FALSE, out.width="100%"}
+show_manhattan(29)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 030 | Y1 | FFPF | COMP_PERCENT | No covariate"}
+```{r p030, echo=FALSE, out.width="100%"}
+show_manhattan(30)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 031 | Y1 | FFPF | PC1 | No covariate"}
+```{r p031, echo=FALSE, out.width="100%"}
+show_manhattan(31)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 032 | Y1 | FFPF | PC2 | No covariate"}
+```{r p032, echo=FALSE, out.width="100%"}
+show_manhattan(32)
+```
+:::
+
+---
+
+<div class="banner-y2">📅 Year 2 Results (Jan-1-2026 & Jan-30-2026)</div>
+
+## Block E — <span class="badge badge-y2">Y2</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 33–40) {#block-e}
+
+<div class="stat-box">
+**Purpose:** Same design as Block A, applied to Year 2 phenotypes. Compare peaks
+between Block A and Block E to identify QTL that replicate across years —
+year-stable loci are the strongest candidates for biologically meaningful
+chilling-requirement QTL.
+</div>
+
+::: {.callout-note collapse="true" title="Run 033 | Y2 | FFPF | BIN_T1 (Jan-1-2026 binary) | Cov: PF"}
+```{r p033, echo=FALSE, out.width="100%"}
+show_manhattan(33)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 034 | Y2 | FFPF | BIN_T2 (Jan-30-2026 binary) | Cov: PF"}
+```{r p034, echo=FALSE, out.width="100%"}
+show_manhattan(34)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 035 | Y2 | FFPF | PERCENT_T1 | Cov: PF"}
+```{r p035, echo=FALSE, out.width="100%"}
+show_manhattan(35)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 036 | Y2 | FFPF | PERCENT_T2 | Cov: PF"}
+```{r p036, echo=FALSE, out.width="100%"}
+show_manhattan(36)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 037 | Y2 | FFPF | BLUE_PERCENT | Cov: PF"}
+```{r p037, echo=FALSE, out.width="100%"}
+show_manhattan(37)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 038 | Y2 | FFPF | COMP_PERCENT | Cov: PF"}
+```{r p038, echo=FALSE, out.width="100%"}
+show_manhattan(38)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 039 | Y2 | FFPF | PC1 | Cov: PF"}
+```{r p039, echo=FALSE, out.width="100%"}
+show_manhattan(39)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 040 | Y2 | FFPF | PC2 | Cov: PF"}
+```{r p040, echo=FALSE, out.width="100%"}
+show_manhattan(40)
+```
+:::
+
+---
+
+## Block F — <span class="badge badge-y2">Y2</span> <span class="badge badge-ff">FF Only</span> (Runs 41–48) {#block-f}
+
+<div class="stat-box">
+**Purpose:** FF-background QTL in Year 2. Compare with Block B (Y1 FF) for year replication.
+</div>
+
+::: {.callout-note collapse="true" title="Run 041 | Y2 | FF | BIN_T1"}
+```{r p041, echo=FALSE, out.width="100%"}
+show_manhattan(41)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 042 | Y2 | FF | BIN_T2"}
+```{r p042, echo=FALSE, out.width="100%"}
+show_manhattan(42)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 043 | Y2 | FF | PERCENT_T1"}
+```{r p043, echo=FALSE, out.width="100%"}
+show_manhattan(43)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 044 | Y2 | FF | PERCENT_T2"}
+```{r p044, echo=FALSE, out.width="100%"}
+show_manhattan(44)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 045 | Y2 | FF | BLUE_PERCENT"}
+```{r p045, echo=FALSE, out.width="100%"}
+show_manhattan(45)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 046 | Y2 | FF | COMP_PERCENT"}
+```{r p046, echo=FALSE, out.width="100%"}
+show_manhattan(46)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 047 | Y2 | FF | PC1"}
+```{r p047, echo=FALSE, out.width="100%"}
+show_manhattan(47)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 048 | Y2 | FF | PC2"}
+```{r p048, echo=FALSE, out.width="100%"}
+show_manhattan(48)
+```
+:::
+
+---
+
+## Block G — <span class="badge badge-y2">Y2</span> <span class="badge badge-pf">PF Only</span> (Runs 49–56) {#block-g}
+
+<div class="stat-box">
+**Purpose:** PF-background modifier loci in Year 2. Compare with Block C (Y1 PF).
+</div>
+
+::: {.callout-note collapse="true" title="Run 049 | Y2 | PF | BIN_T1"}
+```{r p049, echo=FALSE, out.width="100%"}
+show_manhattan(49)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 050 | Y2 | PF | BIN_T2"}
+```{r p050, echo=FALSE, out.width="100%"}
+show_manhattan(50)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 051 | Y2 | PF | PERCENT_T1"}
+```{r p051, echo=FALSE, out.width="100%"}
+show_manhattan(51)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 052 | Y2 | PF | PERCENT_T2"}
+```{r p052, echo=FALSE, out.width="100%"}
+show_manhattan(52)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 053 | Y2 | PF | BLUE_PERCENT"}
+```{r p053, echo=FALSE, out.width="100%"}
+show_manhattan(53)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 054 | Y2 | PF | COMP_PERCENT"}
+```{r p054, echo=FALSE, out.width="100%"}
+show_manhattan(54)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 055 | Y2 | PF | PC1"}
+```{r p055, echo=FALSE, out.width="100%"}
+show_manhattan(55)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 056 | Y2 | PF | PC2"}
+```{r p056, echo=FALSE, out.width="100%"}
+show_manhattan(56)
+```
+:::
+
+---
+
+## Block H — <span class="badge badge-y2">Y2</span> <span class="badge badge-ffpf">FFPF</span> No Covariate / PF Locus Test (Runs 57–64) {#block-h}
+
+<div class="stat-box">
+**Purpose:** PF locus test in Year 2. Compare with Block E (with covariate):
+peaks that disappear when PF is added (Block E) are PF-confounded;
+peaks that persist are PF-independent. Compare with Block D (Y1, same design)
+to assess year stability of PF-associated signals.
+</div>
+
+::: {.callout-note collapse="true" title="Run 057 | Y2 | FFPF | BIN_T1 | No covariate"}
+```{r p057, echo=FALSE, out.width="100%"}
+show_manhattan(57)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 058 | Y2 | FFPF | BIN_T2 | No covariate"}
+```{r p058, echo=FALSE, out.width="100%"}
+show_manhattan(58)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 059 | Y2 | FFPF | PERCENT_T1 | No covariate"}
+```{r p059, echo=FALSE, out.width="100%"}
+show_manhattan(59)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 060 | Y2 | FFPF | PERCENT_T2 | No covariate"}
+```{r p060, echo=FALSE, out.width="100%"}
+show_manhattan(60)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 061 | Y2 | FFPF | BLUE_PERCENT | No covariate"}
+```{r p061, echo=FALSE, out.width="100%"}
+show_manhattan(61)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 062 | Y2 | FFPF | COMP_PERCENT | No covariate"}
+```{r p062, echo=FALSE, out.width="100%"}
+show_manhattan(62)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 063 | Y2 | FFPF | PC1 | No covariate"}
+```{r p063, echo=FALSE, out.width="100%"}
+show_manhattan(63)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 064 | Y2 | FFPF | PC2 | No covariate"}
+```{r p064, echo=FALSE, out.width="100%"}
+show_manhattan(64)
+```
+:::
+
+---
+
+<div class="banner-comb">📅 Combined Year Results (Y1 + Y2, Year-Adjusted)</div>
+
+## Block I — <span class="badge badge-comb">Combined</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 65–72) {#block-i}
+
+<div class="stat-box">
+**Purpose:** The most powerful block for discovering stable, PF-independent budbreak
+QTL. Phenotypes are year-adjusted BLUEs from the combined model
+(`PERCENT ~ Year + Block + Timepoint + NAME`). Year is a fixed effect that absorbs
+systematic season differences before estimating genotypic values. The resulting
+BLUE is passed to GWASpoly, which then maps it against the full marker panel.
+QTL appearing here that also appear in Blocks A and E are year-stable,
+PF-independent, and represent the most biologically credible chilling-requirement loci.
+</div>
+
+::: {.callout-note collapse="true" title="Run 065 | Combined | FFPF | BIN_T1 | Cov: PF"}
+```{r p065, echo=FALSE, out.width="100%"}
+show_manhattan(65)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 066 | Combined | FFPF | BIN_T2 | Cov: PF"}
+```{r p066, echo=FALSE, out.width="100%"}
+show_manhattan(66)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 067 | Combined | FFPF | PERCENT_T1 | Cov: PF"}
+```{r p067, echo=FALSE, out.width="100%"}
+show_manhattan(67)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 068 | Combined | FFPF | PERCENT_T2 | Cov: PF"}
+```{r p068, echo=FALSE, out.width="100%"}
+show_manhattan(68)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 069 | Combined | FFPF | BLUE_PERCENT (year-adjusted) | Cov: PF"}
+```{r p069, echo=FALSE, out.width="100%"}
+show_manhattan(69)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 070 | Combined | FFPF | COMP_PERCENT | Cov: PF"}
+```{r p070, echo=FALSE, out.width="100%"}
+show_manhattan(70)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 071 | Combined | FFPF | PC1 | Cov: PF"}
+```{r p071, echo=FALSE, out.width="100%"}
+show_manhattan(71)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 072 | Combined | FFPF | PC2 | Cov: PF"}
+```{r p072, echo=FALSE, out.width="100%"}
+show_manhattan(72)
+```
+:::
+
+---
+
+## Block J — <span class="badge badge-comb">Combined</span> <span class="badge badge-ff">FF Only</span> (Runs 73–80) {#block-j}
+
+<div class="stat-box">
+**Purpose:** The highest-priority block for dissertation-quality QTL discovery.
+Year-adjusted BLUEs, restricted to the FF cohort — both sources of confounding
+(year effects and PF locus) are removed. A QTL appearing here, in Block B (Y1 FF),
+and in Block F (Y2 FF) represents a year-stable, PF-independent, FF-background
+budbreak locus and is the strongest candidate for a genuine chilling-requirement gene.
+</div>
+
+::: {.callout-note collapse="true" title="Run 073 | Combined | FF | BIN_T1"}
+```{r p073, echo=FALSE, out.width="100%"}
+show_manhattan(73)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 074 | Combined | FF | BIN_T2"}
+```{r p074, echo=FALSE, out.width="100%"}
+show_manhattan(74)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 075 | Combined | FF | PERCENT_T1"}
+```{r p075, echo=FALSE, out.width="100%"}
+show_manhattan(75)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 076 | Combined | FF | PERCENT_T2"}
+```{r p076, echo=FALSE, out.width="100%"}
+show_manhattan(76)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 077 | Combined | FF | BLUE_PERCENT (year-adjusted)"}
+```{r p077, echo=FALSE, out.width="100%"}
+show_manhattan(77)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 078 | Combined | FF | COMP_PERCENT"}
+```{r p078, echo=FALSE, out.width="100%"}
+show_manhattan(78)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 079 | Combined | FF | PC1"}
+```{r p079, echo=FALSE, out.width="100%"}
+show_manhattan(79)
+```
+:::
+
+::: {.callout-note collapse="true" title="Run 080 | Combined | FF | PC2"}
+```{r p080, echo=FALSE, out.width="100%"}
+show_manhattan(80)
+```
+:::
+
+---
