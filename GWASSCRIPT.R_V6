@@ -29,11 +29,10 @@ h1 { border-bottom: 3px solid #2e7d52; padding-bottom: 0.3em; margin-top: 1.2em;
 h2 { border-left: 5px solid #2e7d52; padding-left: 0.7em; margin-top: 1.8em; }
 h3 { color: #2e7d52; margin-top: 1.3em; }
 h4 { color: #1a5fa8; font-size: 1em; }
-.banner { background: linear-gradient(135deg, #1a3a4a 0%, #2e7d52 100%); color: white; padding: 1.1em 1.6em; border-radius: 8px; margin: 2em 0 1em; font-size: 1.1em; font-weight: 700; letter-spacing: 0.03em; }
+.banner      { background: linear-gradient(135deg, #1a3a4a 0%, #2e7d52 100%); color: white; padding: 1.1em 1.6em; border-radius: 8px; margin: 2em 0 1em; font-size: 1.1em; font-weight: 700; letter-spacing: 0.03em; }
 .banner-y1   { background: linear-gradient(135deg, #1a5fa8 0%, #2471b5 100%); color: white; padding: 0.9em 1.4em; border-radius: 8px; margin: 1.5em 0 0.8em; font-size: 1.05em; font-weight: 700; }
 .banner-comb { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); color: white; padding: 0.9em 1.4em; border-radius: 8px; margin: 1.5em 0 0.8em; font-size: 1.05em; font-weight: 700; }
 .banner-rp   { background: linear-gradient(135deg, #1a6b3a 0%, #27ae60 100%); color: white; padding: 0.9em 1.4em; border-radius: 8px; margin: 1.5em 0 0.8em; font-size: 1.05em; font-weight: 700; }
-.banner-ord  { background: linear-gradient(135deg, #b7410e 0%, #e67e22 100%); color: white; padding: 0.9em 1.4em; border-radius: 8px; margin: 1.5em 0 0.8em; font-size: 1.05em; font-weight: 700; }
 .info-box  { background:#eaf4ee; border-left:5px solid #2e7d52; border-radius:0 6px 6px 0; padding:0.85em 1.1em; margin:0.9em 0; color:#1a3a4a; }
 .warn-box  { background:#fef9ec; border-left:5px solid #e6a817; border-radius:0 6px 6px 0; padding:0.85em 1.1em; margin:0.9em 0; color:#4a3800; }
 .stat-box  { background:#eaf1fb; border-left:5px solid #1a5fa8; border-radius:0 6px 6px 0; padding:0.85em 1.1em; margin:0.9em 0; color:#0d2d54; }
@@ -50,7 +49,6 @@ tbody td  { padding:0.45em 0.9em; border-bottom:1px solid #cde0d4; }
 .badge-pf   { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; }
 .badge-ffpf { background:#e0e7ff; color:#3730a3; border:1px solid #a5b4fc; }
 .badge-rp   { background:#d1fae5; color:#065f46; border:1px solid #34d399; }
-.badge-ord  { background:#fde8d8; color:#7d2d00; border:1px solid #f0a070; }
 .callout-note .callout-header { background:#d4edda !important; color:#1a3a4a !important; font-weight:600; }
 .callout-note { border-left-color:#2e7d52 !important; }
 #TOC { border-right:2px solid #2e7d52; padding-right:1em; }
@@ -69,24 +67,26 @@ tbody td  { padding:0.45em 0.9em; border-bottom:1px solid #cde0d4; }
 
 <div class="info-box">
 This pipeline performs GWAS on blackberry budbreak phenotypes using `GWASpoly` for
-tetraploid populations. **72 analyses** across 6 blocks (A–F) and three phenotype
-encoding sets. Y1 data are analysed directly (blocks A–D); Y2 data contribute
-through the combined-year BLUE estimation only and are not run as a standalone year.
-Blocks A–D (runs 1–32) are already complete.
+tetraploid populations. **54 active analyses** across 6 blocks (A–F) and two phenotype
+encoding sets. Y1 data are analysed directly (blocks A–D, runs 1–32 complete);
+Y2 data contribute through combined-year BLUE estimation only and combined blocks
+(E–F, REP_PROP E_RP/F_RP) will be run once Y2 genotype data are available.
+COMP_PERCENT and ORD traits are excluded. Run numbering preserves gaps where
+COMP_PERCENT was removed so that all completed PNGs remain valid — no renaming needed.
 </div>
 
 ## Run Block Summary
 
-**Runs 1–48 — Original 8 traits per block:**
+**Runs 1–48 — Original 7 traits per block (COMP_PERCENT excluded; run numbers 6, 14, 22, 30, 38, 46 are intentionally skipped):**
 
-| Block | Year | Cohort | Covariate | Purpose | Runs |
-|-------|------|--------|-----------|---------|------|
-| A | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ffpf">FFPF</span> | PF | PF-independent QTL, Y1 | 1–8 |
-| B | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ff">FF only</span> | None | FF-background QTL, Y1 | 9–16 |
-| C | <span class="badge badge-y1">Y1</span> | <span class="badge badge-pf">PF only</span> | None | PF-background modifiers, Y1 | 17–24 |
-| D | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ffpf">FFPF</span> | None | PF locus test, Y1 | 25–32 |
-| E | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ffpf">FFPF</span> | PF | Year-stable PF-independent QTL | 33–40 |
-| F | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ff">FF only</span> | None | Year-stable FF QTL (highest priority) | 41–48 |
+| Block | Year | Cohort | Covariate | Purpose | Active Runs |
+|-------|------|--------|-----------|---------|-------------|
+| A | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ffpf">FFPF</span> | PF | PF-independent QTL, Y1 | 1–5, 7–8 |
+| B | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ff">FF only</span> | None | FF-background QTL, Y1 | 9–13, 15–16 |
+| C | <span class="badge badge-y1">Y1</span> | <span class="badge badge-pf">PF only</span> | None | PF-background modifiers, Y1 | 17–21, 23–24 |
+| D | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ffpf">FFPF</span> | None | PF locus test, Y1 | 25–29, 31–32 |
+| E | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ffpf">FFPF</span> | PF | Year-stable PF-independent QTL | 33–37, 39–40 |
+| F | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ff">FF only</span> | None | Year-stable FF QTL (highest priority) | 41–45, 47–48 |
 
 **Runs 49–60 — REP_PROP (2 traits per block):**
 
@@ -99,33 +99,19 @@ Blocks A–D (runs 1–32) are already complete.
 | E_RP | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ffpf">FFPF</span> | PF | 57–58 |
 | F_RP | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ff">FF</span> | None | 59–60 |
 
-**Runs 61–72 — ORD (2 traits per block):**
-
-| Block | Year | Cohort | Covariate | Runs |
-|-------|------|--------|-----------|------|
-| A_ORD | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ffpf">FFPF</span> | PF | 61–62 |
-| B_ORD | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ff">FF</span> | None | 63–64 |
-| C_ORD | <span class="badge badge-y1">Y1</span> | <span class="badge badge-pf">PF</span> | None | 65–66 |
-| D_ORD | <span class="badge badge-y1">Y1</span> | <span class="badge badge-ffpf">FFPF</span> | None | 67–68 |
-| E_ORD | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ffpf">FFPF</span> | PF | 69–70 |
-| F_ORD | <span class="badge badge-comb">Combined</span> | <span class="badge badge-ff">FF</span> | None | 71–72 |
-
 **Trait definitions:**
 
 | Trait | Type | Notes |
 |-------|------|-------|
-| `BIN_T1` | Binary | 1 = any budbreak at T1, 0 = none |
-| `BIN_T2` | Binary | 1 = any budbreak at T2, 0 = none |
-| `PERCENT_T1` | Continuous | % buds broken at T1, per-genotype mean |
-| `PERCENT_T2` | Continuous | % buds broken at T2, per-genotype mean |
-| `BLUE_PERCENT` | Adjusted | Block+Timepoint(+Year) fixed-effect BLUE |
-| `COMP_PERCENT` | Composite | Mean of PERCENT_T1 and PERCENT_T2 |
+| `BIN_T1` | Binary | Any budbreak at T1, yes/no |
+| `BIN_T2` | Binary | Any budbreak at T2, yes/no |
+| `PERCENT_T1` | Continuous | Raw mean % buds broken at T1 across reps |
+| `PERCENT_T2` | Continuous | Raw mean % buds broken at T2 across reps |
+| `BLUE_PERCENT` | Adjusted | Block and timepoint treated as fixed effects; cleaner genotypic estimate than raw percent |
 | `PC1` | PCA score | Major axis of T1/T2 covariation |
 | `PC2` | PCA score | Contrast axis (early vs late budbreak) |
-| `REP_PROP_T1` | Proportion | Fraction of reps showing budbreak at T1 |
-| `REP_PROP_T2` | Proportion | Fraction of reps showing budbreak at T2 |
-| `ORD_T1` | Ordinal | 0 = 0 reps broken; 1 = 1–2 reps; 2 = 3–4 reps at T1 |
-| `ORD_T2` | Ordinal | 0 = 0 reps broken; 1 = 1–2 reps; 2 = 3–4 reps at T2 |
+| `REP_PROP_T1` | Proportion | Fraction of reps showing budbreak at T1 (0.25–1.0) |
+| `REP_PROP_T2` | Proportion | Fraction of reps showing budbreak at T2 (0.25–1.0) |
 
 ---
 
@@ -153,7 +139,7 @@ dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 mp_outdir     <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS/GWASCHILL_OUTPUTS"
 dir.create(mp_outdir, showWarnings = FALSE, recursive = TRUE)
 cat("[Y1 Pheno ]", y1_pheno_file,
-    "\n[Y2 Pheno ]", y2_pheno_file, "(used for combined-year BLUEs only)",
+    "\n[Y2 Pheno ]", y2_pheno_file, "(combined-year BLUEs only)",
     "\n[Geno     ]", geno_file,
     "\n[Run tables]", normalizePath(out_dir, mustWork = FALSE),
     "\n[PNG output]", normalizePath(mp_outdir, mustWork = FALSE), "\n")
@@ -207,12 +193,11 @@ save_png_hq <- function(p, filename, w = 14, h = 8, dpi = 600) {
 
 # Phenotype Construction
 
-## Year 1 Phenotypes (Dec-27-2024 & Jan-8-2025)
+## Year 1 Phenotypes
 
 ```{r y1-pheno}
 y1_raw <- .read_csv(y1_pheno_file)
 names(y1_raw) <- make.unique(trimws(names(y1_raw)))
-
 y1_t1 <- y1_raw %>%
     dplyr::select(Lug = 1, TotalBuds = 3, Cnt = 4) %>%
     dplyr::filter(!is.na(Lug), Lug != "") %>%
@@ -221,7 +206,6 @@ y1_t1 <- y1_raw %>%
                   Cnt = .clamp(Cnt, TotalBuds)) %>%
     dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
     dplyr::select(NAME, Block, TotalBuds_T1 = TotalBuds, Cnt_T1 = Cnt)
-
 y1_t2 <- y1_raw %>%
     dplyr::select(Lug = 6, TotalBuds = 8, Cnt = 9) %>%
     dplyr::filter(!is.na(Lug), Lug != "") %>%
@@ -230,29 +214,23 @@ y1_t2 <- y1_raw %>%
                   Cnt = .clamp(Cnt, TotalBuds)) %>%
     dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
     dplyr::select(NAME, TotalBuds_T2 = TotalBuds, Cnt_T2 = Cnt)
-
 y1_long <- dplyr::full_join(y1_t1, y1_t2, by = "NAME") %>%
     dplyr::mutate(PERCENT_T1 = 100 * Cnt_T1 / TotalBuds_T1,
                   PERCENT_T2 = 100 * Cnt_T2 / TotalBuds_T2,
                   BIN_T1 = as.integer(Cnt_T1 > 0),
-                  BIN_T2 = as.integer(Cnt_T2 > 0),
-                  Year = "Y1")
+                  BIN_T2 = as.integer(Cnt_T2 > 0), Year = "Y1")
 cat("[Y1] Genotypes:", n_distinct(y1_long$NAME),
     "| T1 obs:", sum(!is.na(y1_long$PERCENT_T1)),
     "| T2 obs:", sum(!is.na(y1_long$PERCENT_T2)), "\n")
 ```
 
-## Year 2 Phenotypes (Jan-1-2026 & Jan-30-2026)
+## Year 2 Phenotypes
 
-<div class="info-box">
-Y2 data are loaded here solely to contribute to the combined-year BLUE estimation.
-No Y2-specific GWAS blocks are run — Y2 genotypes have not yet been sequenced.
-</div>
+<div class="info-box">Y2 data loaded for combined-year BLUE estimation only. No Y2-specific GWAS blocks are run — Y2 genotypes have not yet been sequenced.</div>
 
 ```{r y2-pheno}
 y2_raw <- .read_csv(y2_pheno_file)
 names(y2_raw) <- make.unique(trimws(names(y2_raw)))
-
 y2_t1 <- y2_raw %>%
     dplyr::select(Tag = 1, TotalBuds = 2, Cnt = 4) %>%
     dplyr::filter(!is.na(Tag), Tag != "") %>%
@@ -261,7 +239,6 @@ y2_t1 <- y2_raw %>%
                   Cnt = .clamp(Cnt, TotalBuds)) %>%
     dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
     dplyr::select(NAME, Block, TotalBuds_T1 = TotalBuds, Cnt_T1 = Cnt)
-
 y2_t2 <- y2_raw %>%
     dplyr::select(Tag = 6, TotalBuds = 7, Cnt = 9) %>%
     dplyr::filter(!is.na(Tag), Tag != "") %>%
@@ -270,15 +247,13 @@ y2_t2 <- y2_raw %>%
                   Cnt = .clamp(Cnt, TotalBuds)) %>%
     dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
     dplyr::select(NAME, TotalBuds_T2 = TotalBuds, Cnt_T2 = Cnt)
-
 y2_long <- dplyr::full_join(y2_t1, y2_t2, by = "NAME") %>%
     dplyr::mutate(PERCENT_T1 = 100 * Cnt_T1 / TotalBuds_T1,
                   PERCENT_T2 = 100 * Cnt_T2 / TotalBuds_T2,
                   BIN_T1 = as.integer(Cnt_T1 > 0),
-                  BIN_T2 = as.integer(Cnt_T2 > 0),
-                  Year = "Y2")
+                  BIN_T2 = as.integer(Cnt_T2 > 0), Year = "Y2")
 cat("[Y2] Genotypes:", n_distinct(y2_long$NAME),
-    "(used for combined-year BLUEs only — no Y2 GWAS blocks)\n")
+    "(combined-year BLUEs only — no Y2 GWAS blocks)\n")
 ```
 
 ## PF Status Assignment
@@ -302,94 +277,73 @@ cat("[PF] PF=1:", sum(PF_tbl$PF==1,na.rm=TRUE),
     "| PF=0:", sum(PF_tbl$PF==0,na.rm=TRUE),
     "| PF=NA:", sum(is.na(PF_tbl$PF)), "\n")
 unclass <- dplyr::filter(PF_tbl, is.na(PF))$NAME
-if (length(unclass) > 0)
-    warning("[PF] Unclassified: ", paste(unclass, collapse = ", "))
+if (length(unclass) > 0) warning("[PF] Unclassified: ", paste(unclass, collapse=", "))
 ```
 
-## BLUE Estimation (Per-Year & Combined)
-
-<div class="stat-box">
-**BLUE model: `PERCENT ~ Block + Timepoint + NAME`** for Y1. For combined-year:
-`PERCENT ~ Year + Block + Timepoint + NAME`. Year is a fixed effect that absorbs
-systematic season differences before estimating genotypic values — the resulting
-NAME coefficients are the year-adjusted BLUEs passed to GWASpoly.
-</div>
+## BLUE Estimation
 
 ```{r blue-models}
 compute_blue <- function(df_wide, label) {
     long <- df_wide %>%
         dplyr::select(NAME, Block, PERCENT_T1, PERCENT_T2) %>%
-        tidyr::pivot_longer(c(PERCENT_T1, PERCENT_T2), names_to = "Timepoint", values_to = "PERCENT") %>%
+        tidyr::pivot_longer(c(PERCENT_T1, PERCENT_T2), names_to="Timepoint", values_to="PERCENT") %>%
         dplyr::filter(!is.na(PERCENT), is.finite(PERCENT)) %>%
-        dplyr::mutate(NAME = factor(NAME), Block = factor(Block), Timepoint = factor(Timepoint))
+        dplyr::mutate(NAME=factor(NAME), Block=factor(Block), Timepoint=factor(Timepoint))
     cat("[BLUE", label, "] obs:", nrow(long), "| genotypes:", n_distinct(long$NAME), "\n")
-    mod <- tryCatch(lm(PERCENT ~ Block + Timepoint + NAME, data = long),
-                    error = function(e) { message("[BLUE", label, " FALLBACK] ", conditionMessage(e)); NULL })
+    mod <- tryCatch(lm(PERCENT ~ Block + Timepoint + NAME, data=long),
+                    error=function(e){message("[BLUE",label," FALLBACK] ",conditionMessage(e));NULL})
     if (!is.null(mod)) {
         co <- coef(mod); val <- co[grepl("^NAME", names(co))]
-        tibble::tibble(NAME = gsub("^NAME", "", names(val)), BLUE_PERCENT = as.numeric(val))
+        tibble::tibble(NAME=gsub("^NAME","",names(val)), BLUE_PERCENT=as.numeric(val))
     } else {
         long %>% dplyr::group_by(NAME) %>%
-            dplyr::summarise(BLUE_PERCENT = mean(PERCENT, na.rm = TRUE), .groups = "drop")
+            dplyr::summarise(BLUE_PERCENT=mean(PERCENT,na.rm=TRUE),.groups="drop")
     }
 }
-
 blue_y1 <- compute_blue(y1_long, "Y1")
-
 comb_long <- dplyr::bind_rows(
-    y1_long %>% dplyr::select(NAME, Block, PERCENT_T1, PERCENT_T2, Year),
-    y2_long %>% dplyr::select(NAME, Block, PERCENT_T1, PERCENT_T2, Year)
-) %>%
-    tidyr::pivot_longer(c(PERCENT_T1, PERCENT_T2), names_to = "Timepoint", values_to = "PERCENT") %>%
+    y1_long %>% dplyr::select(NAME,Block,PERCENT_T1,PERCENT_T2,Year),
+    y2_long %>% dplyr::select(NAME,Block,PERCENT_T1,PERCENT_T2,Year)) %>%
+    tidyr::pivot_longer(c(PERCENT_T1,PERCENT_T2), names_to="Timepoint", values_to="PERCENT") %>%
     dplyr::filter(!is.na(PERCENT), is.finite(PERCENT)) %>%
-    dplyr::mutate(NAME = factor(NAME), Block = factor(Block),
-                  Year = factor(Year), Timepoint = factor(Timepoint))
+    dplyr::mutate(NAME=factor(NAME), Block=factor(Block),
+                  Year=factor(Year), Timepoint=factor(Timepoint))
 cat("[BLUE Combined] obs:", nrow(comb_long), "| genotypes:", n_distinct(comb_long$NAME), "\n")
-
-mod_comb <- tryCatch(lm(PERCENT ~ Year + Block + Timepoint + NAME, data = comb_long),
-                     error = function(e) { message("[BLUE Combined FAIL] ", conditionMessage(e)); NULL })
+mod_comb <- tryCatch(lm(PERCENT ~ Year + Block + Timepoint + NAME, data=comb_long),
+                     error=function(e){message("[BLUE Combined FAIL] ",conditionMessage(e));NULL})
 if (!is.null(mod_comb)) {
-    co <- coef(mod_comb); val <- co[grepl("^NAME", names(co))]
-    blue_comb <- tibble::tibble(NAME = gsub("^NAME", "", names(val)), BLUE_PERCENT = as.numeric(val))
+    co <- coef(mod_comb); val <- co[grepl("^NAME",names(co))]
+    blue_comb <- tibble::tibble(NAME=gsub("^NAME","",names(val)), BLUE_PERCENT=as.numeric(val))
 } else {
     blue_comb <- comb_long %>% dplyr::group_by(NAME) %>%
-        dplyr::summarise(BLUE_PERCENT = mean(PERCENT, na.rm = TRUE), .groups = "drop")
+        dplyr::summarise(BLUE_PERCENT=mean(PERCENT,na.rm=TRUE),.groups="drop")
 }
 cat("[BLUE Combined] genotypes:", nrow(blue_comb), "\n")
 ```
 
-## Composite Traits, REP_PROP, ORD & PCA
+## Composite Traits, REP_PROP & PCA
 
 ```{r pca-traits}
-# BIN_T1/T2:      mean of per-rep 0/1 binary
-# REP_PROP_T1/T2: same, explicitly named as proportion of reps
-# ORD_T1/T2:      0 = 0 reps broken, 1 = 1-2 reps broken, 2 = 3-4 reps broken
-#                 Added per advisor suggestion (0 vs 1-2 vs 3+ binning)
+# REP_PROP_T1/T2: proportion of reps showing any budbreak (0.25-1.0)
+# COMP_PERCENT computed here for internal use only — not included in GWAS runs
 
 make_trait_table <- function(df_long, label) {
     means <- df_long %>%
         dplyr::group_by(NAME) %>%
         dplyr::summarise(
-            across(c(BIN_T1, BIN_T2, PERCENT_T1, PERCENT_T2), \(x) mean(x, na.rm = TRUE)),
-            REP_PROP_T1 = mean(BIN_T1, na.rm = TRUE),
-            REP_PROP_T2 = mean(BIN_T2, na.rm = TRUE),
-            .groups = "drop") %>%
-        dplyr::mutate(
-            COMP_PERCENT = rowMeans(cbind(PERCENT_T1, PERCENT_T2), na.rm = TRUE),
-            ORD_T1 = dplyr::case_when(REP_PROP_T1 == 0   ~ 0L,
-                                       REP_PROP_T1 <= 0.5 ~ 1L, TRUE ~ 2L),
-            ORD_T2 = dplyr::case_when(REP_PROP_T2 == 0   ~ 0L,
-                                       REP_PROP_T2 <= 0.5 ~ 1L, TRUE ~ 2L))
-
+            across(c(BIN_T1, BIN_T2, PERCENT_T1, PERCENT_T2), \(x) mean(x,na.rm=TRUE)),
+            REP_PROP_T1 = mean(BIN_T1, na.rm=TRUE),
+            REP_PROP_T2 = mean(BIN_T2, na.rm=TRUE),
+            .groups="drop") %>%
+        dplyr::mutate(COMP_PERCENT = rowMeans(cbind(PERCENT_T1, PERCENT_T2), na.rm=TRUE))
     pca_in  <- means %>% dplyr::filter(complete.cases(dplyr::select(., PERCENT_T1, PERCENT_T2)))
     pca_mat <- scale(pca_in %>% dplyr::select(PERCENT_T1, PERCENT_T2))
-    pca_res <- prcomp(pca_mat, center = FALSE, scale. = FALSE)
-    var_exp <- summary(pca_res)$importance["Proportion of Variance", ]
-    cat("[PCA", label, "] PC1:", round(var_exp[1]*100,1), "% | PC2:", round(var_exp[2]*100,1), "%\n")
-    scores  <- tibble::tibble(NAME = pca_in$NAME, PC1 = pca_res$x[,1], PC2 = pca_res$x[,2])
-    dplyr::left_join(means, scores, by = "NAME")
+    pca_res <- prcomp(pca_mat, center=FALSE, scale.=FALSE)
+    var_exp <- summary(pca_res)$importance["Proportion of Variance",]
+    cat("[PCA",label,"] PC1:",round(var_exp[1]*100,1),"% | PC2:",round(var_exp[2]*100,1),"%\n")
+    scores  <- tibble::tibble(NAME=pca_in$NAME, PC1=pca_res$x[,1], PC2=pca_res$x[,2])
+    dplyr::left_join(means, scores, by="NAME")
 }
-
 traits_y1   <- make_trait_table(y1_long, "Y1")
 traits_comb <- make_trait_table(dplyr::bind_rows(y1_long, y2_long), "Combined")
 ```
@@ -399,26 +353,26 @@ traits_comb <- make_trait_table(dplyr::bind_rows(y1_long, y2_long), "Combined")
 ```{r master-pheno}
 make_master <- function(traits_tbl, blue_tbl, pf_tbl) {
     traits_tbl %>%
-        dplyr::left_join(blue_tbl %>% dplyr::select(NAME, BLUE_PERCENT), by = "NAME") %>%
-        dplyr::left_join(pf_tbl, by = "NAME")
+        dplyr::left_join(blue_tbl %>% dplyr::select(NAME, BLUE_PERCENT), by="NAME") %>%
+        dplyr::left_join(pf_tbl, by="NAME")
 }
 PH_Y1   <- make_master(traits_y1,   blue_y1,   PF_tbl)
 PH_COMB <- make_master(traits_comb, blue_comb, PF_tbl)
-cat("[PH_Y1  ]", nrow(PH_Y1), "genotypes | PF=1:", sum(PH_Y1$PF==1,na.rm=TRUE),
-    "| PF=0:", sum(PH_Y1$PF==0,na.rm=TRUE), "\n")
-cat("[PH_COMB]", nrow(PH_COMB), "genotypes | PF=1:", sum(PH_COMB$PF==1,na.rm=TRUE),
-    "| PF=0:", sum(PH_COMB$PF==0,na.rm=TRUE), "\n")
+cat("[PH_Y1  ]",nrow(PH_Y1),"genotypes | PF=1:",sum(PH_Y1$PF==1,na.rm=TRUE),
+    "| PF=0:",sum(PH_Y1$PF==0,na.rm=TRUE),"\n")
+cat("[PH_COMB]",nrow(PH_COMB),"genotypes | PF=1:",sum(PH_COMB$PF==1,na.rm=TRUE),
+    "| PF=0:",sum(PH_COMB$PF==0,na.rm=TRUE),"\n")
 ```
 
 ## Cultivar Name Translation
 
 ```{r cultivar-aliases}
 cultivar_aliases <- c(
-    "Osage"="A-2362T", "Ouachita"="A-1905T", "Natchez"="A-2241T",
-    "Apache"="A-1798T", "Navaho"="A-1172T", "Caddo"="A-2428T",
-    "Ponca"="A-2538T", "Stella"="A-2312", "Immaculate"="A-2718T",
-    "PrimeArkFreedom"="APF-153T", "PrimeArkHorizon"="APF-268",
-    "Superlicious"="A-2500TN", "A-2868TN"="A-2868TN-2"
+    "Osage"="A-2362T","Ouachita"="A-1905T","Natchez"="A-2241T",
+    "Apache"="A-1798T","Navaho"="A-1172T","Caddo"="A-2428T",
+    "Ponca"="A-2538T","Stella"="A-2312","Immaculate"="A-2718T",
+    "PrimeArkFreedom"="APF-153T","PrimeArkHorizon"="APF-268",
+    "Superlicious"="A-2500TN","A-2868TN"="A-2868TN-2"
 )
 translate_names <- function(ph, alias_vec) { ph$NAME <- dplyr::recode(ph$NAME, !!!alias_vec); ph }
 PH_Y1   <- translate_names(PH_Y1,   cultivar_aliases)
@@ -436,24 +390,24 @@ cat("[ALIAS] NOTE: APF-708T not in marker file — excluded.\n")
 ```{r geno-harmonize}
 cat("[GENO] Reading genotype matrix...\n")
 G <- data.table::fread(geno_file)
-names(G)[1:3] <- c("marker", "chrom", "pos")
-geno_samples  <- setdiff(names(G), c("marker", "chrom", "pos"))
+names(G)[1:3] <- c("marker","chrom","pos")
+geno_samples  <- setdiff(names(G), c("marker","chrom","pos"))
 cat("[GENO] Markers:", nrow(G), "| Samples:", length(geno_samples), "\n")
 
-norm_id   <- function(x) toupper(gsub("[-_ ]", "", stringr::str_trim(x)))
+norm_id   <- function(x) toupper(gsub("[-_ ]","",stringr::str_trim(x)))
 all_pheno <- unique(c(PH_Y1$NAME, PH_COMB$NAME))
-geno_map  <- tibble::tibble(orig = geno_samples, key = norm_id(geno_samples))
-pheno_map <- tibble::tibble(NAME = all_pheno, key = norm_id(all_pheno))
-join_map  <- dplyr::inner_join(geno_map, pheno_map, by = "key")
+geno_map  <- tibble::tibble(orig=geno_samples, key=norm_id(geno_samples))
+pheno_map <- tibble::tibble(NAME=all_pheno, key=norm_id(all_pheno))
+join_map  <- dplyr::inner_join(geno_map, pheno_map, by="key")
 cat("[GENO-HARM] Overlap:", nrow(join_map), "samples\n")
 if (nrow(join_map) < 20) stop("FATAL: fewer than 20 overlapping samples.")
 
 for (i in seq_len(nrow(join_map)))
-    data.table::setnames(G, old = join_map$orig[i], new = join_map$NAME[i])
+    data.table::setnames(G, old=join_map$orig[i], new=join_map$NAME[i])
 
 final_samples <- intersect(setdiff(names(G), c("marker","chrom","pos")), all_pheno)
 cat("[GENO-HARM] Final usable samples:", length(final_samples), "\n")
-G_sub    <- G[, c("marker","chrom","pos", final_samples), with = FALSE]
+G_sub    <- G[, c("marker","chrom","pos",final_samples), with=FALSE]
 geno_out <- file.path(out_dir, "geno_numeric_tetra.csv")
 data.table::fwrite(G_sub, geno_out)
 cat("[GENO-HARM] Harmonised genotype file written.\n")
@@ -462,7 +416,7 @@ cat("[GENO-HARM] Harmonised genotype file written.\n")
 ## Year 1 Genotype Match Diagnostic
 
 ```{r geno-diagnostic}
-geno_header <- data.table::fread(geno_file, nrows = 0)
+geno_header <- data.table::fread(geno_file, nrows=0)
 geno_cols   <- names(geno_header)[-(1:3)]
 y1_names    <- sort(unique(PH_Y1$NAME))
 geno_norm   <- norm_id(geno_cols)
@@ -470,7 +424,7 @@ pheno_norm  <- norm_id(y1_names)
 cat("[GENO DIAGNOSTIC] Marker file samples:", length(geno_cols), "\n")
 cat("[PHENO Y1] Unique names:", length(y1_names), "\n\n")
 
-diag_tbl <- tibble::tibble(Phenotype_NAME = y1_names, Pheno_Norm = pheno_norm) %>%
+diag_tbl <- tibble::tibble(Phenotype_NAME=y1_names, Pheno_Norm=pheno_norm) %>%
     dplyr::mutate(
         Exact_Match = Phenotype_NAME %in% geno_cols,
         Fuzzy_Match = Pheno_Norm     %in% geno_norm,
@@ -493,14 +447,14 @@ if (length(no_match_idx) > 0)
 cat("Match summary:\n"); print(table(diag_tbl$Status)); cat("\n")
 no_match_out <- dplyr::filter(diag_tbl, !Fuzzy_Match) %>%
     dplyr::select(Phenotype_NAME, Closest_Geno_Name, Status)
-if (nrow(no_match_out) == 0) cat("All Y1 genotypes found in marker file.\n") else {
-    cat(nrow(no_match_out), "Y1 genotypes with NO match:\n\n"); print(no_match_out, n = Inf) }
+if (nrow(no_match_out)==0) cat("All Y1 genotypes found in marker file.\n") else {
+    cat(nrow(no_match_out),"Y1 genotypes with NO match:\n\n"); print(no_match_out, n=Inf) }
 
 knitr::kable(
-    diag_tbl %>% dplyr::select(Phenotype_NAME, Geno_Column, Closest_Geno_Name, Status) %>%
-        dplyr::arrange(Status, Phenotype_NAME),
-    col.names = c("Y1 Phenotype NAME","Matched Geno Column","Closest Geno Name","Status"),
-    caption = "Y1 genotype match status. Y2 excluded (not yet sequenced).")
+    diag_tbl %>% dplyr::select(Phenotype_NAME,Geno_Column,Closest_Geno_Name,Status) %>%
+        dplyr::arrange(Status,Phenotype_NAME),
+    col.names=c("Y1 Phenotype NAME","Matched Geno Column","Closest Geno Name","Status"),
+    caption="Y1 genotype match status. Y2 excluded (not yet sequenced).")
 ```
 
 ---
@@ -510,6 +464,11 @@ knitr::kable(
 # Run Configuration
 
 ```{r run-config}
+# ── Trait list ────────────────────────────────────────────────────────────────
+# COMP_PERCENT is included here to preserve correct run numbering (same
+# block start positions as original pipeline), then filtered out below.
+# This means runs 6, 14, 22, 30, 38, 46 do not exist — no PNGs to generate
+# for those slots. All completed PNGs from runs 001-032 remain valid.
 TRAITS <- c("BIN_T1","BIN_T2","PERCENT_T1","PERCENT_T2",
             "BLUE_PERCENT","COMP_PERCENT","PC1","PC2")
 
@@ -533,11 +492,12 @@ run_config_orig <- blocks %>%
         Transformation = dplyr::case_when(
             startsWith(Trait, "BIN")     ~ "Binary (any budbreak)",
             startsWith(Trait, "PERCENT") ~ "Percent (0-100), per-genotype mean",
-            Trait == "BLUE_PERCENT"      ~ "BLUE: Block+Timepoint(+Year)-adjusted",
-            Trait == "COMP_PERCENT"      ~ "Composite: mean of both timepoints",
+            Trait == "BLUE_PERCENT"      ~ "BLUE: Block and Timepoint as fixed effects",
             Trait %in% c("PC1","PC2")   ~ "Phenotypic PCA score")) %>%
-    dplyr::select(run_id, Block, Cohort, Covariate, Dataset, Trait, Transformation)
+    dplyr::select(run_id, Block, Cohort, Covariate, Dataset, Trait, Transformation) %>%
+    dplyr::filter(Trait != "COMP_PERCENT")   # remove COMP_PERCENT, preserving run numbering
 
+# ── REP_PROP blocks ───────────────────────────────────────────────────────────
 TRAITS_RP <- c("REP_PROP_T1","REP_PROP_T2")
 blocks_rp <- tibble::tribble(
     ~Block,  ~Cohort, ~Covariate, ~Dataset,    ~Start,
@@ -557,39 +517,22 @@ run_config_rp <- blocks_rp %>%
                   Transformation = "Proportion of reps with any budbreak (0.0-1.0)") %>%
     dplyr::select(run_id, Block, Cohort, Covariate, Dataset, Trait, Transformation)
 
-TRAITS_ORD <- c("ORD_T1","ORD_T2")
-blocks_ord <- tibble::tribble(
-    ~Block,   ~Cohort, ~Covariate, ~Dataset,    ~Start,
-    "A_ORD",  "FFPF",  "PF",       "Y1",          61,
-    "B_ORD",  "FF",    "None",     "Y1",          63,
-    "C_ORD",  "PF",    "None",     "Y1",          65,
-    "D_ORD",  "FFPF",  "None",     "Y1",          67,
-    "E_ORD",  "FFPF",  "PF",       "Combined",    69,
-    "F_ORD",  "FF",    "None",     "Combined",    71
-)
-run_config_ord <- blocks_ord %>%
-    dplyr::rowwise() %>%
-    dplyr::mutate(Traits = list(TRAITS_ORD)) %>%
-    tidyr::unnest(Traits) %>%
-    dplyr::rename(Trait = Traits) %>%
-    dplyr::mutate(run_id = Start + match(Trait, TRAITS_ORD) - 1,
-                  Transformation = "Ordinal: 0=no reps broken, 1=1-2 reps, 2=3-4 reps") %>%
-    dplyr::select(run_id, Block, Cohort, Covariate, Dataset, Trait, Transformation)
+# ── Master run table ──────────────────────────────────────────────────────────
+run_config <- dplyr::bind_rows(run_config_orig, run_config_rp)
+cat("[CONFIG] Total active runs:", nrow(run_config),
+    "\n[CONFIG] Skipped run slots (COMP_PERCENT removed): 6, 14, 22, 30, 38, 46\n")
+knitr::kable(run_config, caption="54-run GWAS configuration (COMP_PERCENT and ORD excluded)")
 
-run_config <- dplyr::bind_rows(run_config_orig, run_config_rp, run_config_ord)
-cat("[CONFIG] Total runs:", nrow(run_config),
-    "(1-48: original | 49-60: REP_PROP | 61-72: ORD)\n")
-knitr::kable(run_config, caption = "72-run GWAS configuration")
-
+# ── Cohort filter ─────────────────────────────────────────────────────────────
 get_cohort_df <- function(dataset, cohort) {
     if (!exists("PH_Y1") || !exists("PH_COMB"))
         stop("Phenotype tables not found. Run all setup chunks first.")
-    ph <- switch(dataset, "Y1" = PH_Y1, "Combined" = PH_COMB,
+    ph <- switch(dataset, "Y1"=PH_Y1, "Combined"=PH_COMB,
                  stop("Unknown dataset: ", dataset))
     switch(cohort,
         "FFPF" = dplyr::filter(ph, !is.na(PF)),
-        "FF"   = dplyr::filter(ph, !is.na(PF), PF == 0),
-        "PF"   = dplyr::filter(ph, !is.na(PF), PF == 1),
+        "FF"   = dplyr::filter(ph, !is.na(PF), PF==0),
+        "PF"   = dplyr::filter(ph, !is.na(PF), PF==1),
         stop("Unknown cohort: ", cohort))
 }
 ```
@@ -601,50 +544,50 @@ get_cohort_df <- function(dataset, cohort) {
 # GWAS Engine
 
 ```{r gwas-function}
-run_gwas_single <- function(run_id, force = FALSE) {
+run_gwas_single <- function(run_id, force=FALSE) {
     cfg <- dplyr::filter(run_config, run_id == !!run_id)
-    if (nrow(cfg) == 0) { message("[SKIP] Run ", run_id, " not in config."); return(invisible(NULL)) }
+    if (nrow(cfg)==0) { message("[SKIP] Run ",run_id," not in config."); return(invisible(NULL)) }
     trait <- cfg$Trait; cov <- cfg$Covariate
     png_path <- file.path(mp_outdir,
-        paste0(sprintf("%03d", run_id), "__", cfg$Block, "__", cfg$Dataset,
-               "__", cfg$Cohort, "__", trait, ".png"))
+        paste0(sprintf("%03d",run_id),"__",cfg$Block,"__",cfg$Dataset,
+               "__",cfg$Cohort,"__",trait,".png"))
     if (file.exists(png_path) && !force) {
-        message("[SKIP] Run ", sprintf("%03d", run_id), " PNG exists. force=TRUE to rerun.")
+        message("[SKIP] Run ",sprintf("%03d",run_id)," PNG exists. force=TRUE to rerun.")
         return(invisible(NULL))
     }
     df <- get_cohort_df(cfg$Dataset, cfg$Cohort)
-    if (!trait %in% names(df)) { message("[SKIP] Trait missing. Run ", run_id); return(invisible(NULL)) }
+    if (!trait %in% names(df)) { message("[SKIP] Trait missing. Run ",run_id); return(invisible(NULL)) }
     n_obs <- sum(!is.na(df[[trait]]))
-    if (n_obs < 20) { message("[SKIP] Only ", n_obs, " obs. Run ", run_id); return(invisible(NULL)) }
+    if (n_obs<20) { message("[SKIP] Only ",n_obs," obs. Run ",run_id); return(invisible(NULL)) }
     df_use <- df %>% dplyr::select(NAME, dplyr::all_of(trait)) %>%
         dplyr::filter(!is.na(.data[[trait]]))
-    pheno_out <- file.path(out_dir, paste0("pheno_run", sprintf("%03d", run_id), ".csv"))
+    pheno_out <- file.path(out_dir, paste0("pheno_run",sprintf("%03d",run_id),".csv"))
     data.table::fwrite(df_use, pheno_out)
-    data_gp <- GWASpoly::read.GWASpoly(ploidy = 4, pheno.file = pheno_out,
-        geno.file = geno_out, format = "numeric", n.traits = 1)
-    if (cov == "PF")
-        data_gp@fixed <- data.frame(PF = factor(df$PF[match(rownames(data_gp@pheno), df$NAME)]))
-    data_gp <- GWASpoly::set.K(data_gp, LOCO = TRUE)
-    params   <- if (cov == "PF") GWASpoly::set.params(fixed = "PF", fixed.type = "factor") else GWASpoly::set.params()
-    fit <- GWASpoly::GWASpoly(data = data_gp, traits = trait,
-        models = c("additive","1-dom","2-dom","general"), params = params,
-        n.core = max(1L, parallel::detectCores() - 1L))
-    thr <- GWASpoly::set.threshold(fit, method = "M.eff", level = 0.05)
-    base <- file.path(out_dir, paste0("run", sprintf("%03d", run_id), "_", cfg$Block, "_", trait))
-    GWASpoly::write.GWASpoly(thr, trait = trait, filename = paste0(base, "_scores.csv"), what = "scores")
-    qtl <- GWASpoly::get.QTL(thr, traits = trait, models = "additive", bp.window = 5e6)
-    data.table::fwrite(qtl, paste0(base, "_QTL.csv"))
-    p <- GWASpoly::manhattan.plot(thr, traits = trait) +
+    data_gp <- GWASpoly::read.GWASpoly(ploidy=4, pheno.file=pheno_out,
+        geno.file=geno_out, format="numeric", n.traits=1)
+    if (cov=="PF")
+        data_gp@fixed <- data.frame(PF=factor(df$PF[match(rownames(data_gp@pheno),df$NAME)]))
+    data_gp <- GWASpoly::set.K(data_gp, LOCO=TRUE)
+    params   <- if (cov=="PF") GWASpoly::set.params(fixed="PF",fixed.type="factor") else GWASpoly::set.params()
+    fit <- GWASpoly::GWASpoly(data=data_gp, traits=trait,
+        models=c("additive","1-dom","2-dom","general"), params=params,
+        n.core=max(1L, parallel::detectCores()-1L))
+    thr <- GWASpoly::set.threshold(fit, method="M.eff", level=0.05)
+    base <- file.path(out_dir, paste0("run",sprintf("%03d",run_id),"_",cfg$Block,"_",trait))
+    GWASpoly::write.GWASpoly(thr, trait=trait, filename=paste0(base,"_scores.csv"), what="scores")
+    qtl <- GWASpoly::get.QTL(thr, traits=trait, models="additive", bp.window=5e6)
+    data.table::fwrite(qtl, paste0(base,"_QTL.csv"))
+    p <- GWASpoly::manhattan.plot(thr, traits=trait) +
         ggplot2::ggtitle(
-            label    = paste0("Run ", sprintf("%03d", run_id), " | Block ", cfg$Block,
-                              " | ", cfg$Dataset, " | Cohort: ", cfg$Cohort, " | Trait: ", trait),
+            label    = paste0("Run ",sprintf("%03d",run_id)," | Block ",cfg$Block,
+                              " | ",cfg$Dataset," | Cohort: ",cfg$Cohort," | Trait: ",trait),
             subtitle = paste0(cfg$Transformation,
-                              if (cov != "None") paste0(" | Covariate: ", cov) else "")) +
-        ggplot2::theme(plot.title    = ggplot2::element_text(size = 13, face = "bold"),
-                       plot.subtitle = ggplot2::element_text(size = 11, color = "grey40"))
+                              if (cov!="None") paste0(" | Covariate: ",cov) else "")) +
+        ggplot2::theme(plot.title    = ggplot2::element_text(size=13,face="bold"),
+                       plot.subtitle = ggplot2::element_text(size=11,color="grey40"))
     save_png_hq(p, png_path)
-    message("[DONE] Run ", sprintf("%03d", run_id), " | ", cfg$Block, " | ",
-            cfg$Dataset, " | ", trait, "\n  ->  ", png_path)
+    message("[DONE] Run ",sprintf("%03d",run_id)," | ",cfg$Block," | ",
+            cfg$Dataset," | ",trait,"\n  ->  ",png_path)
 }
 ```
 
@@ -656,16 +599,12 @@ run_gwas_single <- function(run_id, force = FALSE) {
 
 <div class="warn-box">
 ⚠️ **Run interactively in RStudio — NOT during document render.**
-Runs 1–32 are already complete. Use `run_missing_manhattan_plots()` to continue.
+Runs 1–5, 7–8, 9–13, 15–16, 17–21, 23–24, 25–29, 31–32 are already complete.
+Combined-year blocks (E, F, E_RP, F_RP) will be run once Y2 genotype data are available.
+Run slots 6, 14, 22, 30, 38, 46 do not exist (COMP_PERCENT removed) — delete those 4 PNGs from your output folder if present.
 </div>
 
-## Run All 72 Plots
-
-```{r generate-all, eval=FALSE}
-for (i in run_config$run_id) run_gwas_single(i)
-```
-
-## Run Only Missing Plots
+## Run All Missing Plots
 
 ```{r run-missing, eval=FALSE}
 run_missing_manhattan_plots <- function() {
@@ -673,16 +612,16 @@ run_missing_manhattan_plots <- function() {
         dplyr::rowwise() %>%
         dplyr::mutate(
             png_path = file.path(mp_outdir,
-                paste0(sprintf("%03d", run_id), "__", Block, "__", Dataset,
-                       "__", Cohort, "__", Trait, ".png")),
+                paste0(sprintf("%03d",run_id),"__",Block,"__",Dataset,
+                       "__",Cohort,"__",Trait,".png")),
             exists = file.exists(png_path)) %>%
         dplyr::ungroup()
     done    <- dplyr::filter(status, exists)
     missing <- dplyr::filter(status, !exists)
-    cat("[STATUS]", nrow(done), "complete |", nrow(missing), "missing\n\n")
-    if (nrow(missing) == 0) { message("[OK] All 72 plots exist."); return(invisible(NULL)) }
-    print(missing %>% dplyr::select(run_id, Block, Cohort, Dataset, Trait))
-    for (i in missing$run_id) { message("\n[RUNNING] Run ", sprintf("%03d", i)); run_gwas_single(i) }
+    cat("[STATUS]",nrow(done),"complete |",nrow(missing),"missing\n\n")
+    if (nrow(missing)==0) { message("[OK] All plots exist."); return(invisible(NULL)) }
+    print(missing %>% dplyr::select(run_id,Block,Cohort,Dataset,Trait))
+    for (i in missing$run_id) { message("\n[RUNNING] Run ",sprintf("%03d",i)); run_gwas_single(i) }
     message("\n[COMPLETE] All missing plots generated.")
 }
 run_missing_manhattan_plots()
@@ -692,14 +631,18 @@ run_missing_manhattan_plots()
 
 ```{r run-one-block, eval=FALSE}
 run_block <- function(block_letter) {
-    ids <- dplyr::filter(run_config, Block == block_letter)$run_id
+    ids <- dplyr::filter(run_config, Block==block_letter)$run_id
     for (i in ids) run_gwas_single(i)
 }
-run_block("A")      # Y1, FFPF + PF covariate (runs 1-8)  — DONE
-run_block("E")      # Combined, FFPF + PF covariate (runs 33-40)
-run_block("F")      # Combined, FF only (runs 41-48)
-run_block("A_ORD")  # Y1, FFPF, ORD (runs 61-62)
-run_block("F_ORD")  # Combined, FF only, ORD (runs 71-72)
+run_block("A")     # Y1, FFPF + PF covariate — DONE
+run_block("B")     # Y1, FF only — DONE
+run_block("C")     # Y1, PF only — DONE
+run_block("D")     # Y1, FFPF no covariate — DONE
+run_block("E")     # Combined, FFPF + PF — run after Y2 genotypes arrive
+run_block("F")     # Combined, FF only — run after Y2 genotypes arrive
+run_block("A_RP")  # Y1, FFPF, REP_PROP
+run_block("B_RP")  # Y1, FF, REP_PROP
+# run_gwas_single(7, force=TRUE)  # regenerate single run
 ```
 
 ---
@@ -711,12 +654,12 @@ run_block("F_ORD")  # Combined, FF only, ORD (runs 71-72)
 ```{r display-helper, include=FALSE}
 show_manhattan <- function(run_id) {
     cfg <- dplyr::filter(run_config, run_id == !!run_id)
-    if (nrow(cfg) == 0) { cat("> Run", run_id, "not found.\n\n"); return(invisible()) }
+    if (nrow(cfg)==0) { cat("> Run",run_id,"not found.\n\n"); return(invisible()) }
     png_path <- file.path(mp_outdir,
-        paste0(sprintf("%03d", run_id), "__", cfg$Block, "__", cfg$Dataset,
-               "__", cfg$Cohort, "__", cfg$Trait, ".png"))
+        paste0(sprintf("%03d",run_id),"__",cfg$Block,"__",cfg$Dataset,
+               "__",cfg$Cohort,"__",cfg$Trait,".png"))
     if (file.exists(png_path)) knitr::include_graphics(png_path) else
-        cat("> Plot not yet generated. Run `run_gwas_single(", run_id, ")` then re-render.\n\n")
+        cat("> Plot not yet generated. Run `run_gwas_single(",run_id,")` then re-render.\n\n")
 }
 ```
 
@@ -724,9 +667,9 @@ show_manhattan <- function(run_id) {
 
 <div class="banner-y1">📅 Year 1 Results (Dec-27-2024 & Jan-8-2025)</div>
 
-## Block A — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 1–8) {#block-a}
+## Block A — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 1–5, 7–8) {#block-a}
 
-<div class="stat-box">**Purpose:** PF-independent QTL, Y1. Compare with Block D — peaks in both are confirmed PF-independent.</div>
+<div class="stat-box">**Purpose:** PF-independent QTL, Y1. PF as fixed covariate. Peaks here that also appear in Block D are confirmed PF-independent.</div>
 
 ::: {.callout-note collapse="true" title="Run 001 | Y1 | FFPF | BIN_T1 | Cov: PF"}
 ```{r p001, echo=FALSE, out.width="100%", results="asis"}
@@ -753,11 +696,6 @@ show_manhattan(4)
 show_manhattan(5)
 ```
 :::
-::: {.callout-note collapse="true" title="Run 006 | Y1 | FFPF | COMP_PERCENT | Cov: PF"}
-```{r p006, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(6)
-```
-:::
 ::: {.callout-note collapse="true" title="Run 007 | Y1 | FFPF | PC1 | Cov: PF"}
 ```{r p007, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(7)
@@ -771,7 +709,7 @@ show_manhattan(8)
 
 ---
 
-## Block B — <span class="badge badge-y1">Y1</span> <span class="badge badge-ff">FF Only</span> (Runs 9–16) {#block-b}
+## Block B — <span class="badge badge-y1">Y1</span> <span class="badge badge-ff">FF Only</span> (Runs 9–13, 15–16) {#block-b}
 
 <div class="stat-box">**Purpose:** FF-background QTL, Y1. PF locus has zero variance in this cohort.</div>
 
@@ -800,11 +738,6 @@ show_manhattan(12)
 show_manhattan(13)
 ```
 :::
-::: {.callout-note collapse="true" title="Run 014 | Y1 | FF | COMP_PERCENT"}
-```{r p014, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(14)
-```
-:::
 ::: {.callout-note collapse="true" title="Run 015 | Y1 | FF | PC1"}
 ```{r p015, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(15)
@@ -818,7 +751,7 @@ show_manhattan(16)
 
 ---
 
-## Block C — <span class="badge badge-y1">Y1</span> <span class="badge badge-pf">PF Only</span> (Runs 17–24) {#block-c}
+## Block C — <span class="badge badge-y1">Y1</span> <span class="badge badge-pf">PF Only</span> (Runs 17–21, 23–24) {#block-c}
 
 <div class="stat-box">**Purpose:** PF-background modifier loci, Y1.</div>
 
@@ -847,11 +780,6 @@ show_manhattan(20)
 show_manhattan(21)
 ```
 :::
-::: {.callout-note collapse="true" title="Run 022 | Y1 | PF | COMP_PERCENT"}
-```{r p022, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(22)
-```
-:::
 ::: {.callout-note collapse="true" title="Run 023 | Y1 | PF | PC1"}
 ```{r p023, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(23)
@@ -865,9 +793,9 @@ show_manhattan(24)
 
 ---
 
-## Block D — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> No Covariate / PF Locus Test (Runs 25–32) {#block-d}
+## Block D — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> No Covariate / PF Locus Test (Runs 25–29, 31–32) {#block-d}
 
-<div class="stat-box">**Purpose:** PF locus appears freely. Compare with Block A to distinguish PF-driven vs PF-independent signals.</div>
+<div class="stat-box">**Purpose:** PF locus appears freely. Compare with Block A — peaks in both are confirmed PF-independent; peaks only here are PF-driven.</div>
 
 ::: {.callout-note collapse="true" title="Run 025 | Y1 | FFPF | BIN_T1 | No covariate"}
 ```{r p025, echo=FALSE, out.width="100%", results="asis"}
@@ -894,11 +822,6 @@ show_manhattan(28)
 show_manhattan(29)
 ```
 :::
-::: {.callout-note collapse="true" title="Run 030 | Y1 | FFPF | COMP_PERCENT | No covariate"}
-```{r p030, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(30)
-```
-:::
 ::: {.callout-note collapse="true" title="Run 031 | Y1 | FFPF | PC1 | No covariate"}
 ```{r p031, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(31)
@@ -912,11 +835,11 @@ show_manhattan(32)
 
 ---
 
-<div class="banner-comb">📅 Combined Year Results (Y1 + Y2, Year-Adjusted BLUEs)</div>
+<div class="banner-comb">📅 Combined Year Results — pending Y2 genotype data</div>
 
-## Block E — <span class="badge badge-comb">Combined</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 33–40) {#block-e}
+## Block E — <span class="badge badge-comb">Combined</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 33–37, 39–40) {#block-e}
 
-<div class="stat-box">**Purpose:** Most powerful block for year-stable PF-independent QTL. Year-adjusted BLUEs from `PERCENT ~ Year + Block + Timepoint + NAME`. QTL here that also appear in Block A are the highest-priority candidates.</div>
+<div class="warn-box">**Pending.** Will be run once Y2 genotype data are available. Year-adjusted BLUEs from `PERCENT ~ Year + Block + Timepoint + NAME`.</div>
 
 ::: {.callout-note collapse="true" title="Run 033 | Combined | FFPF | BIN_T1 | Cov: PF"}
 ```{r p033, echo=FALSE, out.width="100%", results="asis"}
@@ -943,11 +866,6 @@ show_manhattan(36)
 show_manhattan(37)
 ```
 :::
-::: {.callout-note collapse="true" title="Run 038 | Combined | FFPF | COMP_PERCENT | Cov: PF"}
-```{r p038, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(38)
-```
-:::
 ::: {.callout-note collapse="true" title="Run 039 | Combined | FFPF | PC1 | Cov: PF"}
 ```{r p039, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(39)
@@ -961,9 +879,9 @@ show_manhattan(40)
 
 ---
 
-## Block F — <span class="badge badge-comb">Combined</span> <span class="badge badge-ff">FF Only</span> (Runs 41–48) {#block-f}
+## Block F — <span class="badge badge-comb">Combined</span> <span class="badge badge-ff">FF Only</span> (Runs 41–45, 47–48) {#block-f}
 
-<div class="stat-box">**Purpose:** Highest-priority block. Year-adjusted BLUEs, FF cohort only — both year effects and PF locus removed. A QTL here that also appears in Block B is the strongest candidate for a genuine chilling-requirement gene.</div>
+<div class="warn-box">**Pending.** Highest-priority block — year-adjusted BLUEs, FF cohort only. Will be run once Y2 genotype data are available.</div>
 
 ::: {.callout-note collapse="true" title="Run 041 | Combined | FF | BIN_T1"}
 ```{r p041, echo=FALSE, out.width="100%", results="asis"}
@@ -990,11 +908,6 @@ show_manhattan(44)
 show_manhattan(45)
 ```
 :::
-::: {.callout-note collapse="true" title="Run 046 | Combined | FF | COMP_PERCENT"}
-```{r p046, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(46)
-```
-:::
 ::: {.callout-note collapse="true" title="Run 047 | Combined | FF | PC1"}
 ```{r p047, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(47)
@@ -1012,7 +925,7 @@ show_manhattan(48)
 
 # REP_PROP Results (Runs 49–60)
 
-<div class="info-box">REP_PROP = fraction of replicate plants showing any budbreak (0.25 = 1 of 4 reps, 1.0 = all reps). More evenly distributed than hard binary; reduces single-rep outlier influence.</div>
+<div class="info-box">REP_PROP = fraction of replicate plants showing any budbreak (0.25 = 1 of 4 reps, 1.0 = all reps). Smoother distribution than hard binary; reduces single-rep outlier influence. Combined blocks (E_RP, F_RP) pending Y2 genotype data.</div>
 
 ## Block A_RP — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 49–50) {#block-a-rp}
 
@@ -1076,6 +989,8 @@ show_manhattan(56)
 
 ## Block E_RP — <span class="badge badge-comb">Combined</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 57–58) {#block-e-rp}
 
+<div class="warn-box">**Pending** — run after Y2 genotype data arrive.</div>
+
 ::: {.callout-note collapse="true" title="Run 057 | Combined | FFPF | REP_PROP_T1 | Cov: PF"}
 ```{r p057, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(57)
@@ -1091,6 +1006,8 @@ show_manhattan(58)
 
 ## Block F_RP — <span class="badge badge-comb">Combined</span> <span class="badge badge-ff">FF Only</span> (Runs 59–60) {#block-f-rp}
 
+<div class="warn-box">**Pending** — run after Y2 genotype data arrive.</div>
+
 ::: {.callout-note collapse="true" title="Run 059 | Combined | FF | REP_PROP_T1"}
 ```{r p059, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(59)
@@ -1099,102 +1016,6 @@ show_manhattan(59)
 ::: {.callout-note collapse="true" title="Run 060 | Combined | FF | REP_PROP_T2"}
 ```{r p060, echo=FALSE, out.width="100%", results="asis"}
 show_manhattan(60)
-```
-:::
-
----
-
-<div class="banner-ord">📊 ORD Results — Ordered Categorical Budbreak (Runs 61–72)</div>
-
-# ORD Results (Runs 61–72)
-
-<div class="info-box">**ORD_T1/T2:** 0 = no reps broke bud, 1 = 1–2 reps broke bud, 2 = 3–4 reps broke bud. Captures the threshold between marginal and consistent budbreak. Added per advisor suggestion to explore 0 / 1–2 / 3+ phenotype binning.</div>
-
-## Block A_ORD — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 61–62) {#block-a-ord}
-
-::: {.callout-note collapse="true" title="Run 061 | Y1 | FFPF | ORD_T1 | Cov: PF"}
-```{r p061, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(61)
-```
-:::
-::: {.callout-note collapse="true" title="Run 062 | Y1 | FFPF | ORD_T2 | Cov: PF"}
-```{r p062, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(62)
-```
-:::
-
----
-
-## Block B_ORD — <span class="badge badge-y1">Y1</span> <span class="badge badge-ff">FF Only</span> (Runs 63–64) {#block-b-ord}
-
-::: {.callout-note collapse="true" title="Run 063 | Y1 | FF | ORD_T1"}
-```{r p063, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(63)
-```
-:::
-::: {.callout-note collapse="true" title="Run 064 | Y1 | FF | ORD_T2"}
-```{r p064, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(64)
-```
-:::
-
----
-
-## Block C_ORD — <span class="badge badge-y1">Y1</span> <span class="badge badge-pf">PF Only</span> (Runs 65–66) {#block-c-ord}
-
-::: {.callout-note collapse="true" title="Run 065 | Y1 | PF | ORD_T1"}
-```{r p065, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(65)
-```
-:::
-::: {.callout-note collapse="true" title="Run 066 | Y1 | PF | ORD_T2"}
-```{r p066, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(66)
-```
-:::
-
----
-
-## Block D_ORD — <span class="badge badge-y1">Y1</span> <span class="badge badge-ffpf">FFPF</span> No Covariate (Runs 67–68) {#block-d-ord}
-
-::: {.callout-note collapse="true" title="Run 067 | Y1 | FFPF | ORD_T1 | No covariate"}
-```{r p067, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(67)
-```
-:::
-::: {.callout-note collapse="true" title="Run 068 | Y1 | FFPF | ORD_T2 | No covariate"}
-```{r p068, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(68)
-```
-:::
-
----
-
-## Block E_ORD — <span class="badge badge-comb">Combined</span> <span class="badge badge-ffpf">FFPF</span> + PF Covariate (Runs 69–70) {#block-e-ord}
-
-::: {.callout-note collapse="true" title="Run 069 | Combined | FFPF | ORD_T1 | Cov: PF"}
-```{r p069, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(69)
-```
-:::
-::: {.callout-note collapse="true" title="Run 070 | Combined | FFPF | ORD_T2 | Cov: PF"}
-```{r p070, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(70)
-```
-:::
-
----
-
-## Block F_ORD — <span class="badge badge-comb">Combined</span> <span class="badge badge-ff">FF Only</span> (Runs 71–72) {#block-f-ord}
-
-::: {.callout-note collapse="true" title="Run 071 | Combined | FF | ORD_T1"}
-```{r p071, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(71)
-```
-:::
-::: {.callout-note collapse="true" title="Run 072 | Combined | FF | ORD_T2"}
-```{r p072, echo=FALSE, out.width="100%", results="asis"}
-show_manhattan(72)
 ```
 :::
 
@@ -1209,8 +1030,8 @@ show_manhattan(72)
 <div class="stat-box">
 **Source:** Significant markers on Ra07 from Run 001 (Block A, Y1, BIN_T1, PF covariate, N = 214).
 **Peak region:** Ra07 ~34.4–36.1 Mb. All significant markers follow an additive model.
-Signals here are PF-independent. Note: long LD in blackberry means the causal variant
-may be anywhere in the region — peak marker location within a gene is not confirmation
+Signals are PF-independent. Long LD in blackberry means the causal variant may be
+anywhere in the region — peak marker location within a gene body is not confirmation
 of causality. Peak position may shift as Y2 data are incorporated in combined-year runs.
 </div>
 
@@ -1241,17 +1062,17 @@ Genes in chromosomal order (Ra07). Border:
 
 <div class="gene-card">
   <div class="gene-card-header"><span class="marker-pill pill-std">5 markers</span><span class="gene-id">Ra_g35125.t1</span><span class="gene-name">HDG1 — HD-ZIP IV homeobox TF</span><span class="gene-pos">34,419,631–34,423,773 bp</span></div>
-  <div class="gene-mech">Five markers cluster at the base of the Ra07 peak. HD-ZIP IV TFs regulate meristematic cell identity, epidermal fate, and organ initiation. Allelic variation could alter bud meristem competence to respond to dormancy-release signals.</div>
+  <div class="gene-mech">Five markers cluster at the base of the Ra07 peak. HD-ZIP IV TFs regulate meristematic cell identity and epidermal fate. Allelic variation could alter bud meristem competence to respond to dormancy-release signals.</div>
 </div>
 
 <div class="gene-card">
   <div class="gene-card-header"><span class="marker-pill pill-std">1 marker</span><span class="gene-id">Ra_g35171.t1</span><span class="gene-name">Cytokinin hydroxylase (CKX-like)</span><span class="gene-pos">34,629,889–34,632,415 bp</span></div>
-  <div class="gene-mech">CKX enzymes irreversibly degrade active cytokinins. Elevated cytokinin promotes earlier budbreak. A low-activity allele would reduce the chill-hour threshold before growth resumes — well-supported in Arabidopsis and Populus dormancy models.</div>
+  <div class="gene-mech">CKX enzymes irreversibly degrade active cytokinins. A low-activity allele would reduce the chill-hour threshold before growth resumes — well-supported in Arabidopsis and Populus dormancy models.</div>
 </div>
 
 <div class="gene-card">
   <div class="gene-card-header"><span class="marker-pill pill-std">2 markers</span><span class="gene-id">Ra_g35198.t1</span><span class="gene-name">BAHD acyltransferase DCR</span><span class="gene-pos">34,768,353–34,770,501 bp</span></div>
-  <div class="gene-mech">Involved in cutin and bud scale wax biosynthesis. Bud scale cutin restricts movement into the meristem during dormancy. Variation could alter bud scale permeability and ease of dormancy release under low chilling conditions.</div>
+  <div class="gene-mech">Involved in bud scale cutin and wax biosynthesis. Variation could alter bud scale permeability and ease of dormancy release under low chilling conditions.</div>
 </div>
 
 <div class="gene-card">
@@ -1261,27 +1082,27 @@ Genes in chromosomal order (Ra07). Border:
 
 <div class="gene-card high-priority">
   <div class="gene-card-header"><span class="marker-pill pill-high">2 markers</span><span class="gene-id">Ra_g35325.t1</span><span class="gene-name">SWEET3 — bidirectional sugar transporter</span><span class="gene-pos">35,400,510–35,401,844 bp</span></div>
-  <div class="gene-mech">Two markers fall inside this gene. SWEET proteins facilitate sucrose movement across membranes and are key nodes in phloem loading. Chilling-induced starch-to-sucrose conversion provides both energy and meristematic activation signal during dormancy release. An allele with altered transport kinetics could reduce chilling needed before budbreak is energetically supported.</div>
+  <div class="gene-mech">Two markers fall inside this gene. SWEET proteins facilitate sucrose movement across membranes. Chilling-induced starch-to-sucrose conversion provides both energy and meristematic activation signal during dormancy release. An allele with altered transport kinetics could reduce chilling needed before budbreak is energetically supported.</div>
 </div>
 
 <div class="gene-card">
   <div class="gene-card-header"><span class="marker-pill pill-std">2 markers</span><span class="gene-id">Ra_g35383.t1</span><span class="gene-name">Pectinesterase / pectinesterase inhibitor 34</span><span class="gene-pos">35,695,899–35,698,786 bp</span></div>
-  <div class="gene-mech">Pectinesterases demethylesterify pectin, altering cell wall rigidity. Cell wall remodeling is a physical prerequisite for budbreak. Variation could affect physical loosening of bud scale tissue.</div>
+  <div class="gene-mech">Pectinesterases demethylesterify pectin, altering cell wall rigidity. Cell wall remodeling is a physical prerequisite for budbreak; variation could affect physical loosening of bud scale tissue.</div>
 </div>
 
 <div class="gene-card top-hit">
   <div class="gene-card-header"><span class="marker-pill pill-top">Top marker</span><span class="marker-pill pill-top">-log10(p) = 6.56</span><span class="gene-id">Ra_g35429.t1</span><span class="gene-name">Glucan endo-1,3-beta-glucosidase</span><span class="gene-pos">35,981,988–35,983,708 bp</span></div>
-  <div class="gene-mech">The genome-wide top marker falls within this gene body with a second marker also inside the locus. Beta-1,3-glucanases degrade callose at plasmodesmata during endo-dormancy, restoring symplastic connectivity and allowing growth-promoting signals to reach the meristem. Given long LD in blackberry, the causal variant may be nearby rather than in the gene body — this should be presented as a candidate locus rather than a confirmed causal gene. The dosage pattern is consistent: genotypes homozygous for the T allele show the highest early budbreak rates.</div>
+  <div class="gene-mech">The genome-wide top marker falls within this gene body with a second marker also inside the locus. Beta-1,3-glucanases degrade callose at plasmodesmata during endo-dormancy, restoring symplastic connectivity and allowing growth-promoting signals to reach the meristem. Given long LD in blackberry, the causal variant may be nearby rather than in the gene body — this is a candidate locus, not a confirmed causal gene. Dosage pattern is consistent: genotypes homozygous for the T allele show the highest early budbreak rates.</div>
 </div>
 
 <div class="gene-card">
   <div class="gene-card-header"><span class="marker-pill pill-std">1 marker</span><span class="gene-id">Ra_g35446.t1</span><span class="gene-name">B3 domain TF (RAV/ABI3-like)</span><span class="gene-pos">36,088,025–36,089,609 bp</span></div>
-  <div class="gene-mech">ABI3/RAV-like B3 TFs integrate ABA signalling with dormancy maintenance. Variation could lower the ABA threshold at which dormancy is released. Sits immediately upstream of the VRN1-like gene — may form a vernalization × ABA regulatory module.</div>
+  <div class="gene-mech">ABA-dependent dormancy regulator. Variation could lower the ABA threshold at which dormancy is released. Sits immediately upstream of the VRN1-like gene — may form a vernalization × ABA regulatory module.</div>
 </div>
 
 <div class="gene-card high-priority">
   <div class="gene-card-header"><span class="marker-pill pill-high">4 markers</span><span class="gene-id">Ra_g35447.t1</span><span class="gene-name">VRN1-like B3 domain transcription factor</span><span class="gene-pos">36,090,128–36,092,040 bp</span></div>
-  <div class="gene-mech">Four markers cluster inside this gene — the highest marker density per gene in the entire interval. VRN1 in cereals is a master chilling-accumulation switch activated after sufficient cold exposure. In blackberry a VRN1 homolog would directly regulate the chilling threshold required before dormancy release is permitted. Mateos et al. (2024) identified a RiVRN1.1 ortholog in raspberry as a key dormancy candidate, providing direct Rosaceae comparative genomic support. Alexander's flowering time GWAS peak on Ra07 is ~1 Mb from this region — overlap would be biologically meaningful and further supports this gene as the top priority candidate in the window.</div>
+  <div class="gene-mech">Four markers cluster inside this gene — the highest marker density per gene in the entire interval. VRN1 in cereals is a master chilling-accumulation switch activated after sufficient cold exposure. In blackberry a VRN1 homolog would directly regulate the chilling threshold required before dormancy release is permitted. Mateos et al. (2024) identified a RiVRN1.1 ortholog in raspberry as a key dormancy candidate, providing direct Rosaceae comparative genomic support. Alexander's flowering time GWAS peak on Ra07 is ~1 Mb from this region — overlap would further strengthen this gene as the top priority candidate.</div>
 </div>
 ```
 
