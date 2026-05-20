@@ -1,0 +1,214 @@
+# ── Standalone Run 001 verification script ────────────────────────────────────
+# Reruns the GWAS for run 001 from scratch and verifies the email statements.
+# Runtime: ~30–60 min depending on machine.
+
+library(tidyverse)
+library(data.table)
+library(GWASpoly)
+library(stringr)
+library(lme4)
+library(parallel)
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+y1_pheno_file <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS/Y1_Data_GWAS/Y1_GWAS_Budbreak_Data_Sorted_ForR.csv"
+geno_file     <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS/captureseq2025_GATK_allsamples_postmean_updog_filtered (1).csv"
+out_dir       <- "gwaspoly_runsets"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+geno_out      <- file.path(out_dir, "geno_numeric_tetra.csv")
+
+# ── Helper functions ──────────────────────────────────────────────────────────
+norm_id <- function(x) toupper(gsub("[-_ ]", "", stringr::str_trim(x)))
+.clamp  <- function(v, maxv) {
+  v <- suppressWarnings(as.numeric(v))
+  maxv <- suppressWarnings(as.numeric(maxv))
+  pmin(pmax(v, 0, na.rm = FALSE), maxv, na.rm = FALSE)
+}
+get_name_y1 <- function(x) {
+  x <- stringr::str_trim(x)
+  x <- sub("_\\d+$", "", x)
+  x <- sub("_\\d+_\\d+_[A-Da-d]$", "", x)
+  x <- sub("_\\d+_[A-Da-d]$", "", x)
+  x <- sub("_[A-Da-d]$", "", x)
+  x <- sub("PF$", "", x)
+  x
+}
+get_block_y1 <- function(x) toupper(stringr::str_extract(x, "[A-Da-d](?=_\\d+$)"))
+
+# ── Phenotype ─────────────────────────────────────────────────────────────────
+y1_raw <- data.table::fread(y1_pheno_file, data.table = FALSE,
+                            na.strings = c("", "NA", "na", "no cuttings", "No cuttings", "N/A"))
+names(y1_raw) <- make.unique(trimws(names(y1_raw)))
+
+y1_t1 <- y1_raw %>%
+  dplyr::select(Lug = 1, TotalBuds = 3, Cnt = 4) %>%
+  dplyr::filter(!is.na(Lug), Lug != "") %>%
+  dplyr::mutate(NAME = get_name_y1(Lug), Block = get_block_y1(Lug),
+                TotalBuds = suppressWarnings(as.numeric(TotalBuds)),
+                Cnt = .clamp(Cnt, TotalBuds)) %>%
+  dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
+  dplyr::select(NAME, Block, TotalBuds_T1 = TotalBuds, Cnt_T1 = Cnt)
+
+y1_t2 <- y1_raw %>%
+  dplyr::select(Lug = 6, TotalBuds = 8, Cnt = 9) %>%
+  dplyr::filter(!is.na(Lug), Lug != "") %>%
+  dplyr::mutate(NAME = get_name_y1(Lug),
+                TotalBuds = suppressWarnings(as.numeric(TotalBuds)),
+                Cnt = .clamp(Cnt, TotalBuds)) %>%
+  dplyr::filter(!is.na(TotalBuds), TotalBuds > 0) %>%
+  dplyr::select(NAME, TotalBuds_T2 = TotalBuds, Cnt_T2 = Cnt)
+
+y1_long <- dplyr::full_join(y1_t1, y1_t2, by = "NAME") %>%
+  dplyr::mutate(BIN_T1 = as.integer(Cnt_T1 > 0))
+
+# ── PF status + aliases ───────────────────────────────────────────────────────
+cultivar_aliases <- c(
+  "Osage" = "A-2362T", "Ouachita" = "A-1905T", "Natchez" = "A-2241T",
+  "Apache" = "A-1798T", "Navaho" = "A-1172T", "Caddo" = "A-2428T",
+  "Ponca" = "A-2538T", "Stella" = "A-2312", "Immaculate" = "A-2718T",
+  "PrimeArkFreedom" = "APF-153T", "PrimeArkHorizon" = "APF-268",
+  "Superlicious" = "A-2500TN", "A-2868TN" = "A-2868TN-2"
+)
+
+PF_tbl <- tibble::tibble(NAME = unique(y1_long$NAME)) %>%
+  dplyr::mutate(NAME = dplyr::recode(NAME, !!!cultivar_aliases)) %>%
+  dplyr::mutate(PF = dplyr::case_when(
+    startsWith(NAME, "APF")  ~ 1L,
+    startsWith(NAME, "A-")   ~ 0L,
+    NAME == "NC430"          ~ 0L,
+    NAME %in% c("PrimeArkFreedom", "PrimeArkHorizon", "Superlicious",
+                "APF-153T", "APF-268") ~ 1L,
+    NAME %in% c("Osage","Ouachita","Natchez","Apache","Ponca","Caddo",
+                "Navaho","Lochness","Immaculate","Von","Tupy","Stella",
+                "Thunderhead","Celestial","Twilight","A-2362T","A-1905T",
+                "A-2241T","A-1798T","A-2538T","A-2428T","A-1172T",
+                "A-2312","A-2718T") ~ 0L,
+    TRUE ~ NA_integer_
+  ))
+
+BIN_T1_means <- y1_long %>%
+  dplyr::mutate(NAME = dplyr::recode(NAME, !!!cultivar_aliases)) %>%
+  dplyr::group_by(NAME) %>%
+  dplyr::summarise(BIN_T1 = mean(BIN_T1, na.rm = TRUE), .groups = "drop")
+
+PH_Y1 <- dplyr::left_join(BIN_T1_means, PF_tbl, by = "NAME")
+
+# ── Genotype harmonisation ────────────────────────────────────────────────────
+cat("[GENO] Loading marker matrix...\n")
+G <- data.table::fread(geno_file)
+names(G)[1:3] <- c("marker", "chrom", "pos")
+geno_samples <- setdiff(names(G), c("marker", "chrom", "pos"))
+
+all_pheno <- unique(PH_Y1$NAME)
+geno_map  <- tibble::tibble(orig = geno_samples, key = norm_id(geno_samples))
+pheno_map <- tibble::tibble(NAME = all_pheno,     key = norm_id(all_pheno))
+join_map  <- dplyr::inner_join(geno_map, pheno_map, by = "key")
+cat("[GENO] Overlap:", nrow(join_map), "samples\n")
+
+for (i in seq_len(nrow(join_map)))
+  data.table::setnames(G, old = join_map$orig[i], new = join_map$NAME[i])
+
+final_samples <- intersect(setdiff(names(G), c("marker","chrom","pos")), all_pheno)
+G_sub <- G[, c("marker","chrom","pos", final_samples), with = FALSE]
+data.table::fwrite(G_sub, geno_out)
+cat("[GENO] Final samples:", length(final_samples), "\n")
+
+# ── GWAS ──────────────────────────────────────────────────────────────────────
+df <- dplyr::filter(PH_Y1, !is.na(PF), !is.na(BIN_T1))
+cat("[RUN001] N =", nrow(df), "\n")
+
+pheno_out <- file.path(out_dir, "pheno_verify001.csv")
+data.table::fwrite(df %>% dplyr::select(NAME, BIN_T1), pheno_out)
+
+data_gp <- GWASpoly::read.GWASpoly(
+  ploidy = 4, pheno.file = pheno_out, geno.file = geno_out,
+  format = "numeric", n.traits = 1)
+
+data_gp@fixed <- data.frame(
+  PF = factor(df$PF[match(rownames(data_gp@pheno), df$NAME)]))
+data_gp <- GWASpoly::set.K(data_gp, LOCO = TRUE)
+params  <- GWASpoly::set.params(fixed = "PF", fixed.type = "factor")
+
+fit <- GWASpoly::GWASpoly(
+  data = data_gp, traits = "BIN_T1",
+  models = c("additive", "1-dom", "2-dom", "general"),
+  params = params,
+  n.core = max(1L, parallel::detectCores() - 1L))
+
+thr <- GWASpoly::set.threshold(fit, method = "M.eff", level = 0.05)
+
+## ── Extract scores and threshold ──────────────────────────────────────────────
+
+# Check the actual structure first
+cat("Threshold structure:\n")
+print(thr@threshold)
+cat("\nScores column names:\n")
+print(names(thr@scores[["BIN_T1"]]))
+
+# Pull threshold directly from the printed table (additive = 5.55 from your output)
+threshold <- 5.55
+
+# Pull scores — column names in this version use different capitalisation
+scores_raw <- thr@scores[["BIN_T1"]]
+
+# Find the actual column names dynamically
+cat("\nAll column names in scores:\n")
+print(names(scores_raw))
+
+# Identify marker/chrom/position columns and score columns
+meta_cols  <- c("Marker", "Chrom", "Position", "marker", "chrom", "pos",
+                "Ref", "Alt", "ref", "alt")
+meta_cols  <- intersect(meta_cols, names(scores_raw))
+score_cols <- setdiff(names(scores_raw), meta_cols)
+
+# Find the additive column (may be named "additive" or "BIN_T1.additive" etc.)
+add_col <- score_cols[grepl("additive", score_cols, ignore.case = TRUE)][1]
+cat("\nUsing additive column:", add_col, "\n")
+
+scores_df <- scores_raw %>%
+  dplyr::mutate(max_score = apply(dplyr::select(., dplyr::all_of(score_cols)),
+                                  1, max, na.rm = TRUE),
+                additive  = .data[[add_col]])
+
+# ── Combine map info with scores ──────────────────────────────────────────────
+# thr@map has marker, chrom, position
+# thr@scores[["BIN_T1"]] has the -log10(p) values, rows aligned to map
+
+map_df    <- as.data.frame(thr@map)
+scores_df <- as.data.frame(thr@scores[["BIN_T1"]])
+
+# Sanity check — should both have same number of rows
+cat("Map rows:", nrow(map_df), "| Scores rows:", nrow(scores_df), "\n")
+cat("Map column names:", names(map_df), "\n\n")
+
+# Bind together
+full_df <- dplyr::bind_cols(map_df, scores_df)
+
+# ── Verification ──────────────────────────────────────────────────────────────
+threshold <- 5.55
+
+# Identify chrom and position columns from map
+cat("Full df columns:", names(full_df), "\n\n")
+
+# Filter significant Ra07 markers
+ra07_sig <- full_df %>%
+  dplyr::filter(grepl("Ra07", Chrom, ignore.case = TRUE),
+                additive >= threshold) %>%
+  dplyr::arrange(Position)
+
+cat("========== VERIFICATION ==========\n")
+cat("1. Significant Ra07 markers:", nrow(ra07_sig), "\n")
+cat("2. Window:", format(min(ra07_sig$Position), big.mark=","),
+    "-", format(max(ra07_sig$Position), big.mark=","), "bp =",
+    round(min(ra07_sig$Position)/1e6, 2), "-",
+    round(max(ra07_sig$Position)/1e6, 2), "Mb,",
+    round((max(ra07_sig$Position) - min(ra07_sig$Position))/1e6, 2), "Mb wide\n")
+
+top <- full_df %>% dplyr::slice_max(additive, n = 1)
+cat("3. Top marker:", top$Marker,
+    "| Chrom:", top$Chrom,
+    "| Position:", format(top$Position, big.mark=","),
+    "| -log10(p):", round(top$additive, 3), "\n")
+
+inside <- top$Position >= 35981988 & top$Position <= 35983708 & top$Chrom == "Ra07"
+cat("4. Top marker inside Ra_g35429 (35,981,988-35,983,708):", inside, "\n")
+cat("===================================\n")
