@@ -1,0 +1,1598 @@
+# ============================================================
+# LOW-CHILL BUDBREAK: BLUEs -> GWASpoly (kinship only) -> locus zoom + candidate genes -> thesis package   (v2, complete rerun)
+# ONE SCRIPT. Edit the paths below, then run the whole thing top to bottom (it can be re-run; finished pieces are skipped).
+#   Stage 1  cleaning, per-experiment and combined BLUEs, diagnostics, histograms, one-row-per-genotype GWASpoly input (incl. did / did not break traits)
+#   Stage 2  GWASpoly: additive + 1-dom, LOCO kinship, M.eff threshold. ONE 600-dpi PNG per trait x model with the Manhattan plot and its own QQ plot beside it
+#            (same layout as the field-earliness GWAS), saved in 08_GWAS/K_only/Manhattan_with_QQ/
+#   Stage 3  locus-zoom plots and candidate-gene workbook (Hillquist Table S8)
+#   Stage 5  robustness checks for Ra01:725,408 (PF adjustment, class members, leave-one-out)
+#   Stage 6  correlation figure, PF vs FF histograms, marker and gene density maps
+#   Stage 7  field earliness (audited file) vs low-chill BLUEs, with calendar-date histograms
+#   Stage 8  extra BLUE figures: by chill hours, proportion that broke bud, spread/reliability, lead-SNP dosage, marker PCA
+#   Final    thesis tables (Thesis_Tables.xlsx), figure list with draft captions, Results draft with every number filled in (11_Thesis_Results). Runs LAST so it sees every figure.
+# BLUEs are CHECK-ADJUSTED (CHECK_ADJUST <- TRUE): lug-set effects estimated from Osage/Ouachita are removed first.
+# Packages (once): data.table, emmeans, GWASpoly, readxl, openxlsx   (optional: GGally, ggplot2 for the correlation figure)
+# ============================================================
+suppressPackageStartupMessages({
+  library(data.table); library(parallel)
+})
+
+# ---------------- PATHS AND SWITCHES ----------------
+work_dir    <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS"
+pheno_file  <- file.path(work_dir, "LowChillGWAS/pheno_GWASpoly_LowChill_Budbreak.csv")   # raw long-format phenotypes
+marker_file <- file.path(work_dir, "Overlap_CaptureSeq_FlexSeq_SharedMarkers_GWASready.csv")
+root_dir    <- file.path(work_dir, "LowChillGWAS/Final_Output")
+annot_file  <- file.path(work_dir, "Annotated Reference Genome.xlsx")                      # Supplemental Table S8
+if (!file.exists(annot_file)) { hit <- list.files(work_dir, pattern = "Annotated.*Reference.*Genome.*[.]xlsx$", recursive = TRUE, full.names = TRUE, ignore.case = TRUE); if (length(hit)) annot_file <- hit[1] }
+RUN_BLUES <- TRUE; RUN_GWAS <- TRUE; RUN_ZOOM <- TRUE; RUN_THESIS <- TRUE; RUN_ROBUST <- TRUE; RUN_FIGS <- TRUE; RUN_EARLINESS <- TRUE; RUN_VIZ <- TRUE   # set any to FALSE to skip that stage
+RUN_PERM <- FALSE      # Stage 5 permutation thresholds (about 30 min). Optional sensitivity analysis only; the thesis uses the M.eff thresholds. TRUE to run them.
+FORCE_RERUN <- FALSE   # FALSE (normal) = SKIP anything that already has saved results: stage 1 if the BLUE file is complete, each GWAS trait whose results + plots exist
+                       # and whose phenotype/settings are unchanged, each existing locus-zoom PNG, each existing density map / correlation figure, stage 5 if its results exist.
+                       # TRUE = redo everything from scratch.
+PLOT_STYLE <- "v3_manhattan_qq_pair"   # plots are redrawn ONCE from the saved results (no GWASpoly rerun) when this label differs from the one stored in Final_Output/plot_style.txt
+ALL_TRAITS <- c("BLUE_149", "BLUE_225", "BLUE_257", "BLUE_379", "BLUE_ALL4", "BLUE_EXP3_225_257_379", "BLUE_EXP2_225_257",   # continuous BLUEs
+                "BREAK_149", "BREAK_225", "BREAK_257", "BREAK_379", "BREAK_225_257", "BREAK_ANY", "BREAK_PROP")             # did / did not break (0/1)
+# ----------------------------------------------------
+out_dir <- root_dir
+# Primocane-fruiting (PF) genotypes in the 324-genotype panel (final calls; every other panel genotype = floricane, FF).
+# Built from pheno_overlap_FlexCapture_PF.csv plus the name fixes agreed for Black_Magic, PrimeArkFreedom, A_2791TNPF, APF_516TN, APF_698T.
+PF_GENOTYPES <- c(
+      "APF_132", "APF_153T", "APF_190T", "APF_268", "APF_334T", "APF_424TN", "APF_477T", "APF_485T",
+      "APF_488T", "APF_489T", "APF_491TN", "APF_499T", "APF_516TN", "APF_534T", "APF_546T", "APF_630T",
+      "APF_647T", "APF_648T", "APF_649T", "APF_651T", "APF_652T", "APF_653T", "APF_654T", "APF_655T",
+      "APF_657T", "APF_658T", "APF_659T", "APF_660T", "APF_661TN", "APF_662TN", "APF_664T", "APF_665T",
+      "APF_666T", "APF_667T", "APF_668T", "APF_669T", "APF_673T", "APF_674T", "APF_675T", "APF_676T",
+      "APF_677T", "APF_678T", "APF_679T", "APF_680T", "APF_681T", "APF_682T", "APF_683T", "APF_685T",
+      "APF_686T", "APF_687T", "APF_688T", "APF_689T", "APF_690T", "APF_691T", "APF_692T", "APF_694T",
+      "APF_695T", "APF_696T", "APF_697T", "APF_698T", "APF_699T", "APF_701T", "APF_702T", "APF_703TN",
+      "APF_704T", "APF_705T", "APF_706T", "APF_707T", "APF_709T", "APF_710T", "APF_712T", "APF_713T",
+      "APF_716T", "APF_717T", "APF_718T", "APF_719T", "APF_720T", "APF_721T", "APF_724T", "APF_725T",
+      "APF_728T", "APF_729TN", "APF_730T", "APF_731TN", "APF_733T", "APF_734T", "APF_735T", "APF_736T",
+      "APF_737T", "APF_740T", "APF_741N", "APF_742T", "APF_743T", "APF_744TN", "APF_745T", "APF_746T",
+      "APF_747T", "APF_749T", "APF_750T", "APF_752T", "APF_753T", "APF_754T", "APF_755T", "APF_756T",
+      "APF_757T", "APF_758T", "APF_759T", "APF_760TN", "APF_761T", "APF_762T", "APF_764T", "APF_765T",
+      "APF_766T", "APF_767T", "A_2500TN", "A_2596T", "A_2614T", "A_2791TNPF", "A_2868TN_7", "A_3017T",
+      "Black_Magic", "PrimeArkFreedom"
+    )
+BLUE_NAME <- "Check-adjusted BLUE"     # use "BLUE" here if CHECK_ADJUST is set to FALSE in stage 1
+trait_label <- function(tr) {
+  if (tr == "BLUE_ALL4") return(paste0(BLUE_NAME, ", all four experiments"))
+  if (tr == "BLUE_EXP3_225_257_379") return(paste0(BLUE_NAME, ", 225, 257 and 379 h combined"))
+  if (tr == "BLUE_EXP2_225_257") return(paste0(BLUE_NAME, ", 225 and 257 h combined"))
+  if (grepl("^BLUE_[0-9]+$", tr)) return(sprintf("%s, %s h chill", BLUE_NAME, sub("BLUE_", "", tr)))
+  if (tr == "BREAK_ANY") return("Binary budbreak (any vs none), any experiment")
+  if (tr == "BREAK_PROP") return("Proportion of experiments with budbreak")
+  if (tr == "BREAK_225_257") return("Binary budbreak (any vs none), 225 or 257 h")
+  if (grepl("^BREAK_[0-9]+$", tr)) return(sprintf("Binary budbreak (any vs none), %s h chill", sub("BREAK_", "", tr)))
+  tr
+}
+model_label <- function(md) switch(md, "additive" = "Additive model", "1-dom-alt" = "Simplex dominant, alternate allele",
+                                   "1-dom-ref" = "Simplex dominant, reference allele", md)
+COL_FF <- "#0072B2"; COL_PF <- "#E69F00"      # colourblind-safe: floricane-fruiting blue, primocane-fruiting orange
+png_cairo <- function(file, w, h) { if (capabilities("cairo")) png(file, width = w, height = h, units = "in", res = 600, type = "cairo") else png(file, width = w, height = h, units = "in", res = 600) }
+doy_ticks <- function(rng) {      # axis ticks at the 1st and 15th of each month for day-of-year values (non-leap calendar, as in the aligned earliness data)
+  dts <- seq(as.Date("2025-01-01"), as.Date("2025-12-31"), by = "1 day"); keep <- format(dts, "%d") %in% c("01", "15")
+  at <- as.integer(format(dts[keep], "%j")); lab <- sub(" 0", " ", format(dts[keep], "%b %d")); i <- at >= rng[1] - 1 & at <= rng[2] + 1
+  list(at = at[i], lab = lab[i])
+}
+style_file <- file.path(root_dir, "plot_style.txt")
+REDRAW <- FORCE_RERUN || !file.exists(style_file) || !identical(trimws(readLines(style_file, warn = FALSE))[1], PLOT_STYLE)
+if (REDRAW && !FORCE_RERUN) cat("Plot style changed: existing plots will be redrawn once from saved results (no GWAS rerun).\n")
+
+# ############################################################
+# STAGE 1: BLUEs
+# ############################################################
+if (RUN_BLUES) {
+  blue_csv <- file.path(root_dir, "06_GWASpoly_Input/pheno_GWASpoly_LowChill_BLUEs.csv")
+  stage1_done <- file.exists(blue_csv) && all(ALL_TRAITS %in% names(fread(blue_csv, nrows = 0)))
+  if (stage1_done && !FORCE_RERUN) {
+    cat("STAGE 1 skipped: the BLUE file already exists with all", length(ALL_TRAITS), "traits. (FORCE_RERUN <- TRUE to redo.)\n")
+  } else {
+  if (!requireNamespace("emmeans", quietly = TRUE)) stop("Please run install.packages('emmeans') once.")
+  EXP_HOURS <- c("1.1" = 149, "1.2" = 225, "2.1" = 257, "2.2" = 379)   # chill hours per experiment
+  MIN_BUDS  <- 10        # a plot with fewer total buds than this is treated as missing
+                         # (0-bud rows are not real zeros). Set to 1 to drop only 0-bud rows.
+  DROP_SEQ  <- "Not Included in SNP Panel"      # Seq Name value for plants with no genotype
+  ALIASES   <- c(Osage = "A_2362T", Ouachita = "A_1905T")   # cultivar name -> selection code
+  CHECK_ADJUST <- TRUE   # TRUE = remove lug-set effects estimated from the Osage/Ouachita checks before fitting BLUEs
+
+  # OPTIONAL: chill-model table for the chill figure. Leave as NA to skip.
+  # CSV with one row per experiment and columns: Exp, and one column per chill model,
+  # e.g.  Exp,ChillHours,Utah,ChillPortions   (Exp = 1.1, 1.2, 2.1, 2.2)
+  CHILL_FILE <- NA_character_
+  BREAK_THRESH <- 0      # binary trait: a genotype "broke" in an experiment if its mean % budbreak across blocks is above this
+  THRESH_PCT <- 20       # "chill needed to reach this % budbreak" (used only with CHILL_FILE)
+
+  # ---- output folders (everything is written under out_dir) ----
+  dirs <- list(log   = file.path(out_dir, "00_Log"),
+               clean = file.path(out_dir, "01_Cleaned_Data"),
+               exp   = file.path(out_dir, "02_Per_Experiment_BLUEs"),
+               diag  = file.path(out_dir, "03_Residual_Diagnostics"),
+               comb  = file.path(out_dir, "04_Combined_Models"),
+               fig   = file.path(out_dir, "05_Figures"),
+               gwas  = file.path(out_dir, "06_GWASpoly_Input"),
+               chk   = file.path(out_dir, "07_Data_Checks"))
+  for (dd in dirs) dir.create(dd, recursive = TRUE, showWarnings = FALSE)
+  # high-quality PNG: 600 dpi, size in inches
+  save_png <- function(file, w, h) {
+    if (capabilities("cairo")) png(file, width = w, height = h, units = "in", res = 600, type = "cairo")
+    else png(file, width = w, height = h, units = "in", res = 600)
+  }
+  sink(file.path(dirs$log, "budbreak_analysis_log.txt"), split = TRUE)
+
+  norm_id <- function(x) toupper(gsub("[-_ ]", "", trimws(as.character(x))))
+  skew <- function(x) { x <- x[is.finite(x)]; m <- mean(x); s <- sd(x); if (s == 0) NA_real_ else mean((x - m)^3) / s^3 }
+  kurt <- function(x) { x <- x[is.finite(x)]; m <- mean(x); s <- sd(x); if (s == 0) NA_real_ else mean((x - m)^4) / s^4 - 3 }
+
+  # ============================================================
+  # 1. READ AND CLEAN
+  # ============================================================
+  cat("================ 1. READ AND CLEAN ================\n")
+  d <- fread(pheno_file, header = TRUE, encoding = "UTF-8", fill = TRUE,
+             colClasses = list(character = c("Genotype", "Seq Name", "Treatment", "Lug_ID", "Lug Position")))
+  names(d)[1] <- sub("^\ufeff", "", names(d)[1])   # remove a byte-order mark if present
+  setnames(d, c("Genotype", "Seq Name", "Treatment", "Lug_ID", "Lug Position", "Order", "Total Buds", "Buds_Broken_Percent"),
+              c("Genotype", "Seq", "Exp", "LugID", "LugPos", "Order", "TotalBuds", "PctFrac"), skip_absent = TRUE)
+  cat("Rows read:", nrow(d), "\n")
+
+  d[, Exp := trimws(Exp)]
+  d[, Seq := trimws(Seq)]
+  d[, Genotype := trimws(Genotype)]
+  d[, TotalBuds := as.numeric(TotalBuds)]
+  d[, PctFrac := as.numeric(PctFrac)]
+
+  # Block (A-D). Normally the last letter of Lug_ID (e.g. L6A). A few rows have a stray comma in
+  # the genotype label that pushes the lug code into the next column, so look there too.
+  get_block <- function(lug, pos) {
+    b <- ifelse(grepl("^L[0-9]+[A-D]$", lug), sub("^L[0-9]+([A-D])$", "\\1", lug), NA_character_)
+    b2 <- ifelse(grepl("^L[0-9]+[A-D]$", pos), sub("^L[0-9]+([A-D])$", "\\1", pos), NA_character_)
+    ifelse(is.na(b), b2, b)
+  }
+  d[, Block := get_block(LugID, LugPos)]
+  n_shift <- d[!grepl("^L[0-9]+[A-D]$", LugID) & !is.na(Block), .N]
+  if (n_shift > 0) cat("Rows with the lug code shifted into the next column (block recovered):", n_shift, "\n")
+  if (d[is.na(Block), .N] > 0) { cat("WARNING: rows with no recoverable block (dropped):", d[is.na(Block), .N], "\n"); d <- d[!is.na(Block)] }
+
+  unknown_exp <- setdiff(unique(d$Exp), names(EXP_HOURS))
+  if (length(unknown_exp) > 0) stop("Unexpected experiment codes in Treatment: ", paste(unknown_exp, collapse = ", "))
+
+  # plots that cannot be genotype-matched
+  n_nosnp <- d[Seq == DROP_SEQ, .N]
+  cat("Rows with Seq Name '", DROP_SEQ, "' (dropped): ", n_nosnp, "\n", sep = "")
+  d <- d[Seq != DROP_SEQ & Seq != "" & !is.na(Seq)]
+
+  # remove spaces inside names, then apply cultivar aliases (Osage = A_2362T, Ouachita = A_1905T)
+  d[, Seq := gsub("\\s+", "", Seq)]
+  d[Seq %in% names(ALIASES), Seq := ALIASES[Seq]]
+
+  # the same Seq Name carrying more than one Genotype label (e.g. a rename or a VLOOKUP slip)
+  cl <- d[, .(Labels = paste(sort(unique(Genotype)), collapse = " | "), nLabels = uniqueN(Genotype)), by = Seq][nLabels > 1]
+  if (nrow(cl) > 0) {
+    cat("\nSeq Names that carry more than one Genotype label (check these against your name tables):\n")
+    print(cl[, .(Seq, Labels)], nrows = 1000)
+    fwrite(cl, file.path(dirs$chk, "SeqName_with_multiple_Genotype_labels.csv"))
+  }
+
+  # 0-bud and very-low-bud plots are missing data, not zeros
+  n_lowbud <- d[TotalBuds < MIN_BUDS | is.na(TotalBuds), .N]
+  cat("\nPlots with fewer than", MIN_BUDS, "buds set to missing:", n_lowbud, "\n")
+  d[, Pct := ifelse(TotalBuds >= MIN_BUDS, 100 * PctFrac, NA_real_)]
+  if (d[Pct < 0 | Pct > 100, .N] > 0) cat("WARNING: values outside 0-100 found.\n")
+  d <- d[!is.na(Pct)]
+  d[, ExpHours := EXP_HOURS[Exp]]
+  # ---- CHECK ADJUSTMENT: Osage + Ouachita are in every lug, so they identify lug-SET differences ----
+  # Each lug set is a fixed group of ~24 genotypes, so set is confounded with genotype and can only be
+  # estimated from the checks. Model on checks: Pct ~ check + block + set. The centred set effects are
+  # subtracted from the non-check plots; block is still handled by the genotype + block model below.
+  d[, LugFix := ifelse(grepl("^L[0-9]+[A-D]$", LugID), LugID, LugPos)]
+  d[, SetNo := sub("^L([0-9]+)[A-D]$", "\\1", LugFix)]
+  d[, PctRaw := Pct]
+  d[, SetEff := 0]
+  if (CHECK_ADJUST) {
+    chk_out <- list()
+    for (e in names(EXP_HOURS)) {
+      ck <- d[Exp == e & Seq %in% ALIASES & !is.na(SetNo)]
+      if (uniqueN(ck$SetNo) < 2 || nrow(ck) < 10) { cat("Exp", e, ": too few check plots, no adjustment\n"); next }
+      ck[, `:=`(CheckF = factor(Seq), BlockF = factor(Block), SetF = factor(SetNo))]
+      fit1 <- lm(Pct ~ CheckF + BlockF + SetF, data = ck)
+      fit0 <- lm(Pct ~ CheckF + BlockF, data = ck)
+      pF <- anova(fit0, fit1)$`Pr(>F)`[2]
+      es <- as.data.table(as.data.frame(emmeans::emmeans(fit1, ~ SetF)))
+      es[, `:=`(SetNo = as.character(SetF), SetEffC = emmean - mean(emmean))]
+      d[Exp == e & !(Seq %in% ALIASES), SetEff := es$SetEffC[match(SetNo, es$SetNo)]]
+      chk_out[[e]] <- es[, .(Exp = e, SetNo, SetEffect = SetEffC, SE)][, `:=`(F_test_p = pF, nCheckPlots = nrow(ck))]
+      cat(sprintf("Exp %s: %d check plots, set effect F-test p = %.3g, SD of set effects = %.1f\n",
+                  e, nrow(ck), pF, sd(es$SetEffC)))
+    }
+    if (length(chk_out) > 0) fwrite(rbindlist(chk_out), file.path(dirs$chk, "Check_derived_lug_set_effects.csv"))
+    d[is.na(SetEff), SetEff := 0]
+    d[!(Seq %in% ALIASES), Pct := PctRaw - SetEff]     # no truncation at 0 or 100: BLUEs are left untransformed
+  }
+  fwrite(d[, .(Genotype, Seq, Exp, ExpHours, Block, LugID, SetNo, TotalBuds, PctRaw, SetEff, Pct)],
+         file.path(dirs$clean, "Budbreak_cleaned_plot_level.csv"))
+
+  # Replicated plants (the Osage/Ouachita checks appear 10x per block) are averaged within a
+  # genotype x block cell so a check does not carry more weight than a single-plant selection.
+  cells <- d[, .(Pct = mean(Pct), PctRaw = mean(PctRaw), nPlants = .N), by = .(Exp, ExpHours, Seq, Block)]   # Pct = check-adjusted (BLUEs); PctRaw = unadjusted (binary traits, zero counts)
+  cells[, `:=`(Exp = factor(Exp, levels = names(EXP_HOURS)), SeqF = factor(Seq), BlockF = factor(Block))]
+  cat("Genotype x block cells:", nrow(cells), "| distinct genotypes:", uniqueN(cells$Seq), "\n")
+  cat("\nCells and genotypes per experiment:\n")
+  print(cells[, .(Cells = .N, Genotypes = uniqueN(Seq),
+                  MedianBlocksPerGenotype = median(as.numeric(table(Seq)))), by = Exp][order(Exp)])
+  cat("\nGenotypes seen in only ONE block of an experiment (single-plot estimates, treat with caution):\n")
+  single <- cells[, .(nBlocks = .N), by = .(Exp, Seq)][nBlocks == 1]
+  print(single[, .N, by = Exp][order(Exp)])
+  fwrite(single, file.path(dirs$chk, "Genotypes_with_single_block.csv"))
+  cat("\nDistribution of cell-level % budbreak by experiment:\n")
+  print(cells[, .(Mean = round(mean(Pct), 2), Median = round(median(Pct), 2), Max = round(max(Pct), 1),
+                  PctCellsAtZero_raw = round(100 * mean(PctRaw == 0), 1), Skew = round(skew(Pct), 2)), by = Exp][order(Exp)])
+
+  # ============================================================
+  # 2. PER-EXPERIMENT RCBD: genotype + block fixed  -> BLUEs
+  # ============================================================
+  cat("\n================ 2. PER-EXPERIMENT RCBD (genotype + block fixed) ================\n")
+  blue_list <- list(); diag_rows <- list()
+  for (e in names(EXP_HOURS)) {
+    ce <- cells[Exp == e]
+    if (nrow(ce) == 0) next
+    ce[, `:=`(SeqF = factor(Seq), BlockF = factor(Block))]
+    fit <- lm(Pct ~ SeqF + BlockF, data = ce)
+    em  <- as.data.table(as.data.frame(emmeans::emmeans(fit, ~ SeqF)))
+    em  <- em[is.finite(emmean), .(Seq = as.character(SeqF), BLUE = emmean, SE = SE)]
+    nb  <- ce[, .(nBlocks = .N), by = Seq]
+    em  <- merge(em, nb, by = "Seq")
+    em[, `:=`(Exp = e, ExpHours = EXP_HOURS[e])]
+    blue_list[[e]] <- em
+
+    r <- residuals(fit); f <- fitted(fit)
+    sw <- if (length(r) >= 3 && length(r) <= 5000) shapiro.test(r)$p.value else NA_real_
+    diag_rows[[e]] <- data.table(Exp = e, Hours = EXP_HOURS[e], nGenotypes = nrow(em), ResidDF = df.residual(fit),
+      BLUE_mean = mean(em$BLUE), BLUE_SD = sd(em$BLUE), BLUE_min = min(em$BLUE), BLUE_max = max(em$BLUE),
+      BLUE_skew = skew(em$BLUE), BLUE_kurt = kurt(em$BLUE), PctBLUEbelow0 = 100 * mean(em$BLUE < 0),
+      Resid_skew = skew(r), Resid_Shapiro_p = sw,
+      SpearmanAbsResid_vs_Fitted = suppressWarnings(cor(abs(r), f, method = "spearman")),
+      ReliabilityApprox = max(0, (var(em$BLUE) - mean(em$SE^2)) / var(em$BLUE)))
+
+    save_png(file.path(dirs$diag, sprintf("Diagnostics_Exp%s_%sh.png", e, EXP_HOURS[e])), 7, 7)
+    par(mfrow = c(2, 2), mar = c(4.5, 4.5, 3, 1))
+    plot(f, r, pch = 16, col = rgb(0, 0, 0, 0.35), xlab = "Fitted % budbreak", ylab = "Residual",
+         main = sprintf("Residuals vs fitted (%d h)", EXP_HOURS[e])); abline(h = 0, lty = 2, col = "red")
+    qqnorm(r, pch = 16, col = rgb(0, 0, 0, 0.35), main = "Residual normal QQ"); qqline(r, col = "red")
+    hist(r, breaks = 30, col = "grey80", border = "white", main = "Residuals", xlab = "Residual")
+    hist(em$BLUE, breaks = 30, col = "#3B6FB6", border = "white", main = sprintf("%s, %d h chill", BLUE_NAME, EXP_HOURS[e]), xlab = paste0(BLUE_NAME, " (% budbreak)"))
+    dev.off()
+  }
+  blues_by_exp <- rbindlist(blue_list)
+  fwrite(blues_by_exp[, .(Genotype = Seq, Exp, ExpHours, BLUE, SE, nBlocks)][order(Exp, Genotype)],
+         file.path(dirs$exp, "BLUEs_per_experiment_long.csv"))
+  diag_tab <- rbindlist(diag_rows)
+  cat("\nBLUE distribution and residual diagnostics by experiment:\n")
+  print(diag_tab[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 3) else x)], nrows = 100)
+  cat("\nHow to read this: strong BLUE/residual skew and Shapiro p near 0 are expected at 149 h (most cells at 0).\n",
+      "A positive Spearman for |resid| vs fitted means variance grows with the mean. No transformation or binning is\n",
+      "applied here; if you want to try one, add it after this step and compare against these BLUEs.\n", sep = "")
+  fwrite(diag_tab, file.path(dirs$diag, "BLUE_distribution_and_residual_diagnostics.csv"))
+
+  # ============================================================
+  # 3. COMBINED MODELS (all fixed): genotype + experiment, block nested in experiment
+  # ============================================================
+  cat("\n================ 3. COMBINED MODELS ================\n")
+  combined_blues <- function(exps, label) {
+    ce <- copy(cells[as.character(Exp) %in% exps])
+    ce[, `:=`(SeqF = factor(Seq), ExpF = factor(as.character(Exp)), ExpBlock = factor(paste(Exp, Block, sep = "_")))]
+    # ExpBlock = block nested within experiment; it also absorbs the experiment main effect
+    fit_add <- lm(Pct ~ ExpBlock + SeqF, data = ce)
+    fit_gxe <- lm(Pct ~ ExpBlock + SeqF + SeqF:ExpF, data = ce)
+    cat(sprintf("\n--- %s: experiments %s ---\n", label, paste(exps, collapse = ", ")))
+    cat("Cells:", nrow(ce), "| genotypes:", nlevels(ce$SeqF), "| residual df (additive):", df.residual(fit_add), "\n")
+    cat("Sequential ANOVA, additive model (experiment-block, then genotype):\n"); print(anova(fit_add))
+    cat("Genotype x experiment test (additive vs interaction model):\n"); print(anova(fit_add, fit_gxe))
+    em <- as.data.table(as.data.frame(emmeans::emmeans(fit_add, ~ SeqF)))
+    em <- em[is.finite(emmean), .(Seq = as.character(SeqF), BLUE = emmean, SE = SE)]
+    nexp <- ce[, .(nExp = uniqueN(Exp), nCells = .N), by = Seq]
+    em <- merge(em, nexp, by = "Seq"); em[, Model := label]
+    capture.output(anova(fit_add), anova(fit_add, fit_gxe), file = file.path(dirs$comb, paste0("ANOVA_", label, ".txt")))
+    fwrite(em[, .(Genotype = Seq, Model, BLUE, SE, nExp, nCells)][order(Genotype)], file.path(dirs$comb, paste0("BLUEs_", label, ".csv")))
+    cat("BLUE mean / SD / skew:", round(mean(em$BLUE), 2), "/", round(sd(em$BLUE), 2), "/", round(skew(em$BLUE), 2), "\n")
+    cat("Genotypes in fewer than", length(exps), "experiments (adjusted for experiment, but less precise):",
+        em[nExp < length(exps), .N], "\n")
+    em
+  }
+  b_all4 <- combined_blues(names(EXP_HOURS), "ALL4_149_225_257_379")
+  b_3exp <- combined_blues(c("1.2", "2.1", "2.2"), "EXP3_225_257_379")
+  b_2exp <- combined_blues(c("1.2", "2.1"), "EXP2_225_257")      # 225 h + 257 h (close in chill units)
+
+  # ============================================================
+  # 4. GENOTYPE x EXPERIMENT: does genetic spread change with chill?
+  # ============================================================
+  cat("\n================ 4. GENOTYPE x EXPERIMENT ================\n")
+  wide <- dcast(blues_by_exp, Seq ~ ExpHours, value.var = "BLUE")
+  setnames(wide, as.character(EXP_HOURS), paste0("BLUE_", EXP_HOURS), skip_absent = TRUE)
+  rank_cols <- intersect(paste0("BLUE_", EXP_HOURS), names(wide))
+  cat("Spearman rank correlations of BLUEs between experiments (pairwise complete):\n")
+  rk <- cor(wide[, ..rank_cols], use = "pairwise.complete.obs", method = "spearman"); print(round(rk, 2))
+  cat("\nPearson correlations:\n"); pr <- cor(wide[, ..rank_cols], use = "pairwise.complete.obs"); print(round(pr, 2))
+  cat("\nGenotype spread by experiment (BLUE SD, and SD after removing estimation error):\n")
+  print(blues_by_exp[, .(nGenotypes = .N, BLUE_SD = round(sd(BLUE), 2),
+                         GenotypicSD_approx = round(sqrt(max(0, var(BLUE) - mean(SE^2))), 2),
+                         MeanSE = round(mean(SE), 2)), by = .(Hours = ExpHours)][order(Hours)])
+  cat("\nIf GenotypicSD_approx rises with chill hours the genotypes are separating as they receive more chilling.\n",
+      "High rank correlations with a significant genotype x experiment F test would match the 'scale, not rank' expectation.\n", sep = "")
+  write.csv(round(rk, 3), file.path(dirs$comb, "BLUE_rank_correlations_between_experiments.csv"))
+
+  # ============================================================
+  # 5. BUILD THE ONE-ROW-PER-GENOTYPE TABLE AND MATCH TO THE MARKER FILE
+  # ============================================================
+  cat("\n================ 5. GWASpoly INPUT (one row per genotype) ================\n")
+  pheno <- merge(wide, b_all4[, .(Seq, BLUE_ALL4 = BLUE)], by = "Seq", all = TRUE)
+  pheno <- merge(pheno, b_3exp[, .(Seq, BLUE_EXP3_225_257_379 = BLUE)], by = "Seq", all = TRUE)
+  pheno <- merge(pheno, b_2exp[, .(Seq, BLUE_EXP2_225_257 = BLUE)], by = "Seq", all = TRUE)
+  # ---- binary did / did not break traits (one per treatment, plus combined across treatments) ----
+  brk <- cells[, .(Break = as.integer(mean(PctRaw) > BREAK_THRESH)), by = .(Exp, Seq)]   # binary traits use the RAW (unadjusted) percentages
+  brk_w <- dcast(brk, Seq ~ Exp, value.var = "Break")
+  setnames(brk_w, names(EXP_HOURS), paste0("BREAK_", EXP_HOURS), skip_absent = TRUE)
+  brk_cols <- intersect(paste0("BREAK_", EXP_HOURS), names(brk_w))
+  brk_w[, nTested := rowSums(!is.na(.SD)), .SDcols = brk_cols]
+  brk_w[, BREAK_ANY  := as.integer(rowSums(.SD, na.rm = TRUE) > 0), .SDcols = brk_cols]                 # broke in at least one treatment
+  if (all(c("BREAK_225", "BREAK_257") %in% names(brk_w)))      # broke in the 225 h and/or the 257 h experiment
+    brk_w[, BREAK_225_257 := ifelse(is.na(BREAK_225) & is.na(BREAK_257), NA_integer_, as.integer(pmax(BREAK_225, BREAK_257, na.rm = TRUE)))]
+  brk_w[, BREAK_PROP := ifelse(nTested >= 2, rowSums(.SD, na.rm = TRUE) / nTested, NA_real_), .SDcols = brk_cols]  # share of tested treatments in which it broke
+  cat("\nBinary budbreak traits (1 = mean % budbreak above ", BREAK_THRESH, "): prevalence among genotypes tested\n", sep = "")
+  print(round(sapply(intersect(c(brk_cols, "BREAK_225_257", "BREAK_ANY"), names(brk_w)), function(cn) mean(brk_w[[cn]], na.rm = TRUE)), 2))
+  cat("Genotypes with BREAK_PROP (tested in at least 2 treatments):", sum(is.finite(brk_w$BREAK_PROP)), "\n")
+  fwrite(brk_w, file.path(dirs$comb, "Binary_budbreak_by_treatment.csv"))
+  pheno <- merge(pheno, brk_w[, intersect(c("Seq", brk_cols, "BREAK_225_257", "BREAK_ANY", "BREAK_PROP"), names(brk_w)), with = FALSE], by = "Seq", all.x = TRUE)
+  nb_wide <- dcast(blues_by_exp, Seq ~ ExpHours, value.var = "nBlocks"); setnames(nb_wide, as.character(EXP_HOURS), paste0("nBlocks_", EXP_HOURS), skip_absent = TRUE)
+  pheno <- merge(pheno, nb_wide, by = "Seq", all.x = TRUE)
+  setnames(pheno, "Seq", "Genotype")
+  cat("Genotypes with a BLUE:", nrow(pheno), "\n")
+
+  mk_hdr <- names(fread(marker_file, nrows = 0))
+  if (!identical(tolower(mk_hdr[1:3]), c("marker", "chrom", "position")))
+    cat("WARNING: first three marker-file columns are not Marker/Chrom/Position:", paste(mk_hdr[1:3], collapse = ", "), "\n")
+  samp <- mk_hdr[-(1:3)]
+  cat("Marker file sample columns:", length(samp), "| duplicated column names:", sum(duplicated(samp)), "\n")
+  key <- norm_id(samp)
+  pick <- function(nm) {
+    ex <- which(samp == nm)
+    if (length(ex) > 0) return(c(samp[ex[1]], "exact"))
+    cand <- which(key == norm_id(nm))
+    if (length(cand) == 0) return(c(NA, "NONE"))
+    pref <- cand[!grepl("_FLEX$", samp[cand])]            # prefer the Capture-Seq column over a _FLEX copy
+    c(samp[if (length(pref) > 0) pref[1] else cand[1]], "normalized")
+  }
+  m <- t(vapply(pheno$Genotype, pick, character(2)))
+  pheno[, `:=`(MarkerColumn = m[, 1], MatchType = m[, 2])]
+  cat("Name match to marker file:\n"); print(table(pheno$MatchType))
+  nomatch <- pheno[MatchType == "NONE", Genotype]
+  if (length(nomatch) > 0) { cat("\nNOT FOUND in the marker file (cannot be used in GWAS):\n"); print(nomatch) }
+  dupcol <- pheno[!is.na(MarkerColumn)][duplicated(MarkerColumn) | duplicated(MarkerColumn, fromLast = TRUE)]
+  if (nrow(dupcol) > 0) { cat("\nWARNING: several phenotype names point to the same marker column (merge or fix):\n"); print(dupcol[, .(Genotype, MarkerColumn)]) }
+
+  fwrite(pheno, file.path(dirs$gwas, "Budbreak_BLUEs_all_genotypes_with_match_flags.csv"))
+  gw <- pheno[!is.na(MarkerColumn) & !(MarkerColumn %in% dupcol$MarkerColumn)]
+  gw_out <- gw[, c("MarkerColumn", intersect(c(paste0("BLUE_", EXP_HOURS), "BLUE_ALL4", "BLUE_EXP3_225_257_379", "BLUE_EXP2_225_257", paste0("BREAK_", EXP_HOURS), "BREAK_225_257", "BREAK_ANY", "BREAK_PROP"), names(gw))), with = FALSE]
+  setnames(gw_out, "MarkerColumn", "Genotype")
+  setorder(gw_out, Genotype)
+  stopifnot(!anyDuplicated(gw_out$Genotype), all(gw_out$Genotype %in% samp), !any(grepl("\\s", gw_out$Genotype)))
+  fwrite(gw_out, file.path(dirs$gwas, "pheno_GWASpoly_LowChill_BLUEs.csv"), na = "NA")
+  cat("\nWrote pheno_GWASpoly_LowChill_BLUEs.csv: ", nrow(gw_out), " genotypes (one row each, names = marker column names).\n", sep = "")
+  cat("Trait columns:", paste(setdiff(names(gw_out), "Genotype"), collapse = ", "), "\n")
+  cat("Genotypes with BLUEs but no genotype data are listed above and in Budbreak_BLUEs_all_genotypes_with_match_flags.csv.\n")
+
+  cat("\nBLUE comparison, all four experiments vs three experiments (225/257/379):\n")
+  cmp <- gw_out[is.finite(BLUE_ALL4) & is.finite(BLUE_EXP3_225_257_379)]
+  cat("Pearson r:", round(cor(cmp$BLUE_ALL4, cmp$BLUE_EXP3_225_257_379), 3),
+      "| Spearman rho:", round(cor(cmp$BLUE_ALL4, cmp$BLUE_EXP3_225_257_379, method = "spearman"), 3),
+      "| n =", nrow(cmp), "\n")
+
+  # ============================================================
+  # 6. FIGURE: histograms (diagonal), r (upper), scatter (lower)
+  # ============================================================
+  cat("\n================ 6. FIGURES ================\n")
+  panel_hist <- function(x, ...) {
+    usr <- par("usr"); on.exit(par(usr = usr))
+    x <- x[is.finite(x)]; h <- hist(x, plot = FALSE, breaks = 20)
+    par(usr = c(usr[1:2], 0, max(h$counts) * 1.15))
+    rect(h$breaks[-length(h$breaks)], 0, h$breaks[-1], h$counts, col = "#E69F00", border = "white")
+  }
+  panel_cor <- function(x, y, ...) {
+    usr <- par("usr"); on.exit(par(usr = usr)); par(usr = c(0, 1, 0, 1))
+    ok <- is.finite(x) & is.finite(y); r <- cor(x[ok], y[ok])
+    text(0.5, 0.5, sprintf("%.2f", r), cex = 1.4 + 1.2 * abs(r), col = if (abs(r) > 0.7) "#B03A2E" else "grey25")
+  }
+  panel_pts <- function(x, y, ...) { points(x, y, pch = 16, cex = 0.5, col = rgb(0, 0, 0, 0.35)); abline(lm(y ~ x), col = "#B03A2E", lwd = 1.2) }
+
+  # Fig1 (correlation figure, same style as Godwin et al. 2025) is drawn in Stage 6 so it is made even when stage 1 is skipped.
+
+  # Fig2 (BLUE histograms, primocane- vs floricane-fruiting genotypes in two colours) is drawn in Stage 6 so it is made even when stage 1 is skipped.
+
+  # Optional chill-model figure: chill needed to reach THRESH_PCT % budbreak under each chill model
+  if (!is.na(CHILL_FILE) && file.exists(CHILL_FILE)) {
+    ch <- fread(CHILL_FILE); ch[, Exp := as.character(Exp)]
+    mods <- setdiff(names(ch), "Exp")
+    req_one <- function(y, x) {                       # y = BLUE at the 4 experiments in chill order, x = chill metric
+      ok <- is.finite(y); y <- cummax(y[ok]); x <- x[ok]
+      i <- which(y >= THRESH_PCT)[1]
+      if (is.na(i)) return(NA_real_)
+      if (i == 1) return(x[1])
+      x[i - 1] + (THRESH_PCT - y[i - 1]) / (y[i] - y[i - 1]) * (x[i] - x[i - 1])
+    }
+    bw <- dcast(blues_by_exp, Seq ~ Exp, value.var = "BLUE")
+    ex <- names(EXP_HOURS)
+    reqs <- lapply(mods, function(mo) {
+      x <- ch[match(ex, Exp), get(mo)]
+      sapply(seq_len(nrow(bw)), function(i) req_one(as.numeric(unlist(bw[i, ..ex])), x))
+    })
+    names(reqs) <- paste0("Req_", mods)
+    rq <- data.table(Genotype = bw$Seq, as.data.table(reqs))
+    fwrite(rq, file.path(dirs$comb, sprintf("Chill_needed_for_%s_pct_budbreak_by_chill_model.csv", THRESH_PCT)))
+    fd <- as.data.frame(rq[, -1])
+    fd <- fd[rowSums(is.finite(as.matrix(fd))) >= 2, , drop = FALSE]
+    if (nrow(fd) > 10) {
+      save_png(file.path(dirs$fig, "Fig3_Chill_model_requirement_correlation.png"), 8, 8)
+      pairs(fd, diag.panel = panel_hist, upper.panel = panel_cor, lower.panel = panel_pts, gap = 0.4,
+            main = sprintf("Chill needed to reach %d%% budbreak, by chill model", THRESH_PCT))
+      dev.off()
+    }
+    cat("Chill-model figure written (genotypes that never reach the threshold are NA).\n")
+  } else cat("No CHILL_FILE set: skipped the chill-model figure.\n")
+
+  writeLines(c("Final_Output folder map",
+    "00_Log                  analysis log (all printed results, ANOVA tables, counts)",
+    "01_Cleaned_Data         cleaned plot-level data",
+    "02_Per_Experiment_BLUEs genotype BLUEs +/- SE from each experiment's RCBD",
+    "03_Residual_Diagnostics residual/QQ/BLUE histograms per experiment + diagnostics table",
+    "04_Combined_Models      combined-model BLUEs, ANOVA tables, rank correlations",
+    "05_Figures              600-dpi PNGs: correlation matrix, BLUE histograms, chill-model figure",
+    "06_GWASpoly_Input       pheno_GWASpoly_LowChill_BLUEs.csv (one row per genotype) + match flags",
+    "07_Data_Checks          names, single-block genotypes and other items to review"),
+    file.path(out_dir, "README_folder_map.txt"))
+  cat("\nDone. Files are in:", out_dir, "(see README_folder_map.txt)\n")
+  cat("Send back 00_Log/budbreak_analysis_log.txt (or paste the console) so I can check the numbers.\n")
+  sink()   # if the script stops early, run sink() once in the console to close the log file
+
+  }  # end of "else" (stage 1 not skipped)
+}
+
+# ############################################################
+# STAGE 2: GWASpoly (kinship only)
+# ############################################################
+if (RUN_GWAS) {
+  suppressPackageStartupMessages(library(GWASpoly))
+  blue_pheno_file <- file.path(root_dir, "06_GWASpoly_Input/pheno_GWASpoly_LowChill_BLUEs.csv")
+  out_dir <- file.path(root_dir, "08_GWAS")
+  TRAITS      <- ALL_TRAITS
+  MODELS      <- c("additive", "1-dom")
+  COVARIATE_SETS <- list(K_only = 0L)   # number of marker PCs used as fixed covariates
+  REAL_CHROMS <- paste0("Ra0", 1:7)                 # chromosomes analysed (unplaced scaffolds dropped)
+  MIN_MAF     <- 0.05     # GWASpoly set.params(MAF = ...)   (package default is 0.01)
+  MAX_GENO_FREQ <- 0.95   # GWASpoly set.params(geno.freq = ...) (package default is 0.99)
+  THRESH_LEVEL  <- 0.05   # M.eff Bonferroni family-wise level
+  PEAK_WINDOW   <- 1e6    # significant markers on one chromosome within this many bp are grouped into one peak
+  FIGURE_W <- 13; FIGURE_H <- 4.8   # inches; Manhattan on the left, its QQ plot on the right, 600 dpi (same as the field-earliness GWAS)
+  TOP_N         <- 25     # top markers per trait x model written out even if nothing crosses the threshold
+  N_CORES       <- max(1L, parallel::detectCores() - 1L)
+  # ------------------------------------------------
+
+  dir_in  <- file.path(out_dir, "00_Input")
+  dir.create(dir_in, recursive = TRUE, showWarnings = FALSE)
+  sink(file.path(out_dir, "gwas_log.txt"), split = TRUE)
+  save_png <- function(file, w, h) {
+    if (capabilities("cairo")) png(file, width = w, height = h, units = "in", res = 600, type = "cairo")
+    else png(file, width = w, height = h, units = "in", res = 600)
+  }
+
+  # ============================================================
+  # 1. READ + ALIGN GENOTYPES AND PHENOTYPES
+  # ============================================================
+  cat("================ 1. INPUT ================\n")
+  ph <- fread(blue_pheno_file)
+  setnames(ph, 1, "Genotype")
+  traits_present <- intersect(TRAITS, names(ph))
+  if (length(traits_present) < length(TRAITS)) cat("Traits not found in phenotype file (skipped):", setdiff(TRAITS, traits_present), "\n")
+  TRAITS <- traits_present
+  stopifnot(!anyDuplicated(ph$Genotype), length(TRAITS) > 0)
+  for (tr in grep("^BREAK_", TRAITS, value = TRUE)) cat(sprintf("  %-11s n = %d | proportion that broke = %.2f\n", tr, sum(is.finite(ph[[tr]])), mean(ph[[tr]], na.rm = TRUE)))
+  cat("Phenotype rows (one per genotype):", nrow(ph), "| traits:", paste(TRAITS, collapse = ", "), "\n")
+
+  G <- fread(marker_file, header = TRUE, check.names = FALSE)
+  names(G)[1:3] <- c("Marker", "Chrom", "Position")
+  cat("Genotype file:", nrow(G), "markers x", ncol(G) - 3, "samples\n")
+  G <- G[Chrom %in% REAL_CHROMS]
+  cat("Markers on", paste(REAL_CHROMS[c(1, length(REAL_CHROMS))], collapse = "-"), ":", nrow(G), "\n")
+  G <- G[!duplicated(paste(Chrom, Position))]
+
+  missing_geno <- setdiff(ph$Genotype, names(G))
+  if (length(missing_geno) > 0) {
+    cat("Phenotyped genotypes with NO marker column (dropped from GWAS):", paste(missing_geno, collapse = ", "), "\n")
+    ph <- ph[Genotype %in% names(G)]
+  }
+  samples <- ph$Genotype
+  M <- as.matrix(G[, ..samples]); storage.mode(M) <- "numeric"
+  cat("Samples used:", length(samples), "\n")
+  cat("Dosage range:", paste(range(M, na.rm = TRUE), collapse = " to "),
+      "| % non-integer cells before rounding:", round(100 * mean(abs(M - round(M)) > 0.05, na.rm = TRUE), 2), "\n")
+  M <- pmin(pmax(round(M), 0), 4)                    # integer dosage 0-4, as in the earlier GWAS runs
+  cat("% missing genotype cells:", round(100 * mean(is.na(M)), 2), "\n")
+
+  # ---- write GWASpoly input files (shared by every run) ----
+  geno_out <- file.path(dir_in, "geno_GWASpoly_input.csv")
+  fwrite(cbind(G[, .(Marker, Chrom, Position)], as.data.table(M)), geno_out)
+  cat("Wrote", geno_out, "\n")
+
+  # ============================================================
+  # helpers: QQ, lambda, Manhattan, tables
+  # ============================================================
+  lambda_gc <- function(s) { s <- s[is.finite(s)]; chisq <- qchisq(10^(-s), 1, lower.tail = FALSE); median(chisq) / qchisq(0.5, 1) }
+  qq_panel <- function(s, main = "") {
+    s <- sort(s[is.finite(s)], decreasing = TRUE); n <- length(s)
+    e <- -log10((seq_len(n) - 0.5) / n)
+    lo <- -log10(qbeta(0.975, seq_len(n), n - seq_len(n) + 1)); hi <- -log10(qbeta(0.025, seq_len(n), n - seq_len(n) + 1))
+    plot(e, s, type = "n", xlab = expression(Expected ~ -log[10](p)), ylab = expression(Observed ~ -log[10](p)), main = main,
+         xlim = c(0, max(e)), ylim = c(0, max(s, e)), las = 1)
+    polygon(c(e, rev(e)), c(lo, rev(hi)), col = "grey88", border = NA)
+    abline(0, 1, col = "red", lty = 2); points(e, s, pch = 16, cex = 0.5, col = rgb(0, 0, 0, 0.5))
+    legend("topleft", bty = "n", cex = 0.95, legend = sprintf("lambda = %.2f", lambda_gc(s)))
+  }
+  manhattan_panel <- function(map, s, thr, main = "") {
+    chr <- factor(map$Chrom, levels = REAL_CHROMS)
+    chrlen <- tapply(map$Position, chr, max, na.rm = TRUE); chrlen[is.na(chrlen)] <- 0
+    offset <- c(0, cumsum(as.numeric(chrlen)))[seq_along(chrlen)]; names(offset) <- names(chrlen)
+    x <- map$Position + offset[as.character(chr)]
+    col <- ifelse(as.integer(chr) %% 2 == 1, "#2C5F8A", "#8AA9C6")
+    ymax <- max(c(s, thr), na.rm = TRUE) * 1.08
+    plot(x, s, pch = 16, cex = 0.5, col = col, xaxt = "n", xlab = "", ylab = expression(-log[10](p)), main = main,
+         ylim = c(0, ymax), xlim = c(0, sum(as.numeric(chrlen))), bty = "l", las = 1)
+    axis(1, at = offset + chrlen / 2, labels = names(chrlen), tick = FALSE, cex.axis = 0.95)
+    abline(h = thr, col = "#D55E00", lty = 2)
+    sig <- which(is.finite(s) & s > thr); if (length(sig) > 0) points(x[sig], s[sig], pch = 16, cex = 0.8, col = "#D55E00")
+  }
+  draw_pair <- function(file, map, s, thr, tr, md, n) {          # ONE Manhattan plot with ITS OWN QQ plot beside it (same layout as the field-earliness GWAS)
+    save_png(file, FIGURE_W, FIGURE_H)
+    layout(matrix(1:2, nrow = 1), widths = c(3, 1.1)); par(oma = c(0, 0, 2.6, 0))
+    par(mar = c(3.4, 4.8, 1, 1)); manhattan_panel(map, s, thr)
+    par(mar = c(4.4, 4.6, 1, 1)); qq_panel(s)
+    mtext(sprintf("%s  |  %s  |  kinship only", trait_label(tr), model_label(md)), outer = TRUE, line = 1.2, cex = 1.05, font = 2)
+    mtext(sprintf("n = %d genotypes  |  M.eff threshold = %.2f  |  lambda = %.2f", n, thr, lambda_gc(s)), outer = TRUE, line = 0, cex = 0.85, col = "grey30")
+    dev.off()
+  }
+  draw_plots <- function(tr, map, sc, th_row, n, png_path) {      # one PNG per dosage model
+    for (md in colnames(sc)) draw_pair(png_path(tr, md), map, sc[[md]], unname(th_row[md]), tr, md, n)
+  }
+  group_peaks <- function(dt) {          # dt: significant markers of one trait x model, with Chrom, Position, Score
+    if (nrow(dt) == 0) return(dt[, Peak := integer(0)])
+    dt <- dt[order(Chrom, Position)]; dt[, Peak := NA_integer_]; pk <- 0L
+    for (ch in unique(dt$Chrom)) {
+      idx <- which(dt$Chrom == ch); last <- -Inf
+      for (i in idx) { if (dt$Position[i] - last > PEAK_WINDOW) pk <- pk + 1L; dt$Peak[i] <- pk; last <- dt$Position[i] }
+    }
+    dt
+  }
+
+  # ============================================================
+  # 2. RUN GWASPOLY: every covariate set x every trait
+  # ============================================================
+  all_lambda <- list(); all_sig <- list(); all_peaks <- list(); all_top <- list(); all_thr <- list()
+  settings <- list(MODELS = MODELS, MIN_MAF = MIN_MAF, MAX_GENO_FREQ = MAX_GENO_FREQ, THRESH_LEVEL = THRESH_LEVEL)
+  pheno_sig <- function(x) { f <- tempfile(); writeLines(paste(ph$Genotype, format(x, digits = 10)), f); on.exit(unlink(f)); unname(tools::md5sum(f)) }
+  for (cs in names(COVARIATE_SETS)) {
+    npc <- COVARIATE_SETS[[cs]]
+    cat("\n================ ", cs, " (PCs as covariates: ", npc, ") ================\n", sep = "")
+    d_cs <- file.path(out_dir, cs)
+    for (sub in c("Manhattan_with_QQ", "Tables")) dir.create(file.path(d_cs, sub), recursive = TRUE, showWarnings = FALSE)
+    rds_path <- function(tr) file.path(d_cs, "Tables", paste0("scores_", tr, "_", cs, ".rds"))
+    png_path <- function(tr, md) file.path(d_cs, "Manhattan_with_QQ", paste0(tr, "__", md, ".png"))
+
+    ph_cs <- ph[, c("Genotype", TRAITS), with = FALSE]
+    if (npc > 0) ph_cs <- merge(ph_cs, pcs[, c("Genotype", paste0("PC", seq_len(npc))), with = FALSE], by = "Genotype", sort = FALSE)
+    ph_file <- file.path(dir_in, paste0("pheno_GWASpoly_input_", cs, ".csv"))
+    fwrite(ph_cs, ph_file, na = "NA")
+    sigs <- sapply(TRAITS, function(tr) pheno_sig(ph_cs[[tr]]))
+
+    is_done <- function(tr) {
+      if (FORCE_RERUN || !file.exists(rds_path(tr))) return(FALSE)
+      old <- tryCatch(readRDS(rds_path(tr)), error = function(e) NULL)
+      if (is.null(old) || !identical(old$sig, sigs[[tr]]) || !identical(old$settings, settings)) return(FALSE)
+      all(file.exists(vapply(colnames(old$scores), function(md) png_path(tr, md), character(1))))
+    }
+    todo <- TRAITS[!vapply(TRAITS, is_done, logical(1))]
+    cat("Already done (skipped):", if (length(setdiff(TRAITS, todo))) paste(setdiff(TRAITS, todo), collapse = ", ") else "none", "\n")
+    cat("To run now:", if (length(todo)) paste(todo, collapse = ", ") else "none", "\n")
+    if (REDRAW) for (tr in setdiff(TRAITS, todo)) if (file.exists(rds_path(tr))) {      # new plot style: redraw from saved results only
+      ob <- readRDS(rds_path(tr)); draw_plots(tr, ob$map, ob$scores, ob$thr, sum(is.finite(ph_cs[[tr]])), png_path); cat("  redrawn plots for", tr, "\n")
+    }
+
+    if (length(todo)) {
+      dat <- read.GWASpoly(ploidy = 4, pheno.file = ph_file, geno.file = geno_out, format = "numeric",
+                           n.traits = length(TRAITS), delim = ",")
+      dat <- set.K(dat, LOCO = TRUE)
+      prm <- if (npc > 0) set.params(MAF = MIN_MAF, geno.freq = MAX_GENO_FREQ,
+                                     fixed = paste0("PC", seq_len(npc)), fixed.type = rep("numeric", npc))
+             else set.params(MAF = MIN_MAF, geno.freq = MAX_GENO_FREQ)
+      fit <- GWASpoly(data = dat, models = MODELS, traits = todo, params = prm, n.core = N_CORES)
+      thr <- set.threshold(fit, method = "M.eff", level = THRESH_LEVEL)
+      map <- as.data.frame(fit@map); setnames(map, 1:3, c("Marker", "Chrom", "Position"))
+      th  <- thr@threshold
+      for (tr in todo) {
+        sc <- as.data.frame(fit@scores[[tr]]); stopifnot(nrow(sc) == nrow(map))
+        mods <- colnames(sc)
+        cat(sprintf("  %-22s n = %d genotypes | markers tested = %d\n", tr, sum(is.finite(ph_cs[[tr]])), nrow(sc)))
+        draw_plots(tr, map, sc, th[tr, ], sum(is.finite(ph_cs[[tr]])), png_path)
+        saveRDS(list(map = map, scores = sc, thr = th[tr, ], sig = sigs[[tr]], settings = settings), rds_path(tr))
+      }
+    }
+
+    # ---- summary pass over ALL traits (new and previously done) ----
+    for (tr in TRAITS) {
+      obj <- readRDS(rds_path(tr)); map <- obj$map; sc <- obj$scores; th_tr <- obj$thr
+      nobs <- sum(is.finite(ph_cs[[tr]]))
+      for (md in colnames(sc)) {
+        s <- sc[[md]]; thv <- unname(th_tr[md])
+        all_lambda[[length(all_lambda) + 1]] <- data.table(CovSet = cs, Trait = tr, Model = md, n = nobs,
+          Lambda = lambda_gc(s), Threshold = thv, nSignificant = sum(s > thv, na.rm = TRUE), MaxScore = max(s, na.rm = TRUE))
+        dt <- data.table(CovSet = cs, Trait = tr, Model = md, map[, c("Marker", "Chrom", "Position")], Score = s, Threshold = thv)
+        dt <- dt[is.finite(Score)]
+        all_top[[length(all_top) + 1]] <- dt[order(-Score)][seq_len(min(TOP_N, .N))]
+        sg <- dt[Score > Threshold]
+        if (nrow(sg) > 0) {
+          sg <- group_peaks(sg); sg[, nSigInPeak := .N, by = Peak]
+          all_sig[[length(all_sig) + 1]] <- sg
+          all_peaks[[length(all_peaks) + 1]] <- sg[, .SD[which.max(Score)], by = Peak][
+            , .(CovSet, Trait, Model, Peak, PeakMarker = Marker, Chrom, Position, Score, Threshold, nSigInPeak)]
+        }
+      }
+    }
+  }
+
+  # ============================================================
+  # 3. SUMMARY TABLES
+  # ============================================================
+  cat("\n================ SUMMARY ================\n")
+  dir_sum <- file.path(out_dir, "09_Summary_Tables"); dir.create(dir_sum, showWarnings = FALSE)
+  lam <- rbindlist(all_lambda); fwrite(lam, file.path(dir_sum, "Genomic_inflation_and_threshold_by_trait_model.csv"))
+  fwrite(rbindlist(all_top), file.path(dir_sum, "Top_markers_per_trait_model.csv"))
+  sig <- if (length(all_sig)) rbindlist(all_sig, fill = TRUE) else data.table()
+  pks <- if (length(all_peaks)) rbindlist(all_peaks, fill = TRUE) else data.table()
+  fwrite(sig, file.path(dir_sum, "Significant_markers_all.csv")); fwrite(pks, file.path(dir_sum, "Peak_markers_all.csv"))
+
+  cat("Genomic inflation (lambda) and number of significant markers (median lambda by covariate set):\n")
+  print(lam[, .(MedianLambda = round(median(Lambda), 2), MinLambda = round(min(Lambda), 2), MaxLambda = round(max(Lambda), 2),
+                ModelsWithSignificantMarkers = sum(nSignificant > 0)), by = CovSet])
+  cat("\nTraits x models with significant markers:\n")
+  if (nrow(lam[nSignificant > 0])) print(lam[nSignificant > 0][order(CovSet, Trait, Model), .(CovSet, Trait, Model, nSignificant, MaxScore = round(MaxScore, 2), Threshold = round(Threshold, 2), Lambda = round(Lambda, 2))], nrows = 500) else cat("None crossed the M.eff threshold.\n")
+  if (nrow(pks)) { cat("\nPeaks (one row per peak, window =", PEAK_WINDOW, "bp):\n"); print(pks[order(CovSet, Trait, Model, Chrom, Position)], nrows = 500) }
+  cat("\nHow to read: lambda near 1 means little inflation; well above ~1.1 means the covariate set is not controlling structure.\n",
+      "Kinship-only (LOCO) model; no PC covariates.\n", sep = "")
+  writeLines(c("08_GWAS folder map",
+    "00_Input    GWASpoly input files",
+    "K_only              kinship-only runs: Manhattan_with_QQ/ (one 600-dpi PNG per trait x model, Manhattan left and its QQ plot right; file names <trait>__<model>.png), Tables/ (R objects)",
+    "09_Summary_Tables   inflation + thresholds, top markers, all significant markers, peak markers",
+    "gwas_log.txt        everything printed during the run"), file.path(out_dir, "README_folder_map.txt"))
+  png_files <- list.files(out_dir, pattern = "\\.png$", recursive = TRUE, full.names = TRUE)
+  cat("\nPNG files written:", length(png_files), "(Manhattan + QQ pairs)\n")
+  cat("Example folder:", file.path(out_dir, names(COVARIATE_SETS)[1], "Manhattan_with_QQ"), "\n")
+  if (length(png_files) > 0) print(head(data.frame(file = sub(paste0(out_dir, "/"), "", png_files, fixed = TRUE), MB = round(file.size(png_files) / 1e6, 1)), 8))
+  cat("\nDone. Files are in:", out_dir, "\n")
+  cat("Send back gwas_log.txt (or the console output) so I can check the results.\n")
+  sink()   # if the script stops early, run sink() once in the console to close the log file
+
+}
+
+# ############################################################
+# STAGE 3: LOCUS ZOOM + CANDIDATE GENES
+# ############################################################
+if (RUN_ZOOM) {
+  suppressPackageStartupMessages({ library(GWASpoly); library(readxl); library(openxlsx) })
+  gwas_dir <- file.path(root_dir, "08_GWAS")
+  lz_dir   <- file.path(root_dir, "10_LocusZoom_and_Candidates")
+  COVSETS <- c("K_only"); HALF_WIN <- 500e3; GENE_WIN <- 250e3; MIN_SCORE_FOR_LOCUS <- 0
+  TOP_RUNS_PER_LOCUS <- 5; LOCUS_MERGE <- 1e6
+  dir.create(file.path(lz_dir, "LocusZoom"), recursive = TRUE, showWarnings = FALSE)
+  save_png <- function(f, w, h) { if (capabilities("cairo")) png(f, w, h, units = "in", res = 600, type = "cairo") else png(f, w, h, units = "in", res = 600) }
+  ## ---- annotation (Table S8) ----
+  an <- as.data.table(read_excel(annot_file, sheet = "Table S8", skip = 2, col_names = FALSE, .name_repair = "minimal"))
+  an <- an[-1]                                   # header row (row 3 of sheet)
+  setnames(an, c("ID","Chr","Start","End","Strand","nr_match","nr_desc","AT_match","AT_desc","SP_match","SP_desc","TR_match","TR_desc","RS_match","RS_desc"))
+  an[, `:=`(Start = as.numeric(Start), End = as.numeric(End))]
+  an[, Gene := sub("\\.t[0-9]+$", "", ID)]
+
+  ## ---- peaks and significant markers from the summary tables ----
+  sumdir <- file.path(gwas_dir, "09_Summary_Tables")
+  pk  <- fread(file.path(sumdir, "Peak_markers_all.csv"))
+  sig <- fread(file.path(sumdir, "Significant_markers_all.csv"))
+  if (!nrow(pk)) stop("No significant peaks found.")
+  pk <- pk[Score >= MIN_SCORE_FOR_LOCUS]
+  setorder(pk, Chrom, Position)
+  ## merge peaks from different runs into loci
+  pk[, Locus := { l <- 1L; out <- integer(.N); out[1] <- 1L
+                  for (i in seq_len(.N)[-1]) { if (Chrom[i] != Chrom[i-1] || Position[i] - Position[i-1] > LOCUS_MERGE) l <- l + 1L; out[i] <- l }
+                  out }]
+  loci <- pk[, .(Chrom = Chrom[1], MinPos = min(Position), MaxPos = max(Position),
+                 BestScore = max(Score), nRuns = .N), by = Locus]
+  loci[, Lead := pk[, .SD[which.max(Score)], by = Locus]$PeakMarker]
+  loci[, LeadPos := pk[, .SD[which.max(Score)], by = Locus]$Position]
+  setorder(loci, -BestScore); loci[, LocusID := sprintf("%s_%.2fMb", Chrom, LeadPos/1e6)]
+  fwrite(loci, file.path(lz_dir, "Loci_summary.csv"))
+
+  ## ---- genotypes for LD (r^2 with the lead SNP) ----
+  geno <- fread(file.path(gwas_dir, "00_Input", "geno_GWASpoly_input.csv"))
+  Mx <- as.matrix(geno[, -(1:3), with = FALSE]); rownames(Mx) <- geno$Marker
+  r2_with <- function(lead, markers) {
+    if (!lead %in% rownames(Mx)) return(rep(NA_real_, length(markers)))
+    x <- Mx[lead, ]; m <- intersect(markers, rownames(Mx))
+    r <- suppressWarnings(cor(t(Mx[m, , drop = FALSE]), x, use = "pairwise.complete.obs"))^2
+    out <- rep(NA_real_, length(markers)); out[match(m, markers)] <- r[, 1]; out
+  }
+  ld_col <- function(r2) { r2[is.na(r2)] <- 0; cut_i <- cut(r2, c(-1, .2, .4, .6, .8, 1.01), labels = FALSE)
+    c("grey65","#4575b4","#66bd63","#fdae61","#d73027")[cut_i] }
+
+  ## ---- locus-zoom plotting ----
+  zoom_plot <- function(chrom, lead, lead_pos, cs, trait, model, file) {
+    obj <- readRDS(file.path(gwas_dir, cs, "Tables", paste0("scores_", trait, "_", cs, ".rds")))
+    sc <- obj$scores; md <- model; if (!md %in% colnames(sc)) return(invisible())
+    d <- data.table(obj$map, Score = sc[[md]], thr = unname(obj$thr[md]))
+    lo <- lead_pos - HALF_WIN; hi <- lead_pos + HALF_WIN
+    w <- d[Chrom == chrom & Position >= lo & Position <= hi & is.finite(Score)]
+    if (!nrow(w)) return(invisible())
+    w[, r2 := r2_with(lead, Marker)]
+    ge <- an[Chr == chrom & End >= lo & Start <= hi]
+    ge1 <- ge[, .SD[1], by = Gene]                      # one row per gene model
+    save_png(file, 10, 6.2)
+    layout(matrix(1:2, 2), heights = c(3.3, 1.7))
+    par(mar = c(0.6, 4.6, 4, 1))
+    plot(w$Position/1e6, w$Score, pch = 19, col = ld_col(w$r2), cex = 1.1, xlim = c(lo, hi)/1e6,
+         ylim = c(0, max(w$Score, w$thr, na.rm = TRUE) * 1.1), xaxt = "n", ylab = expression(-log[10](italic(p))),
+         main = sprintf("%s, %s\nLead SNP %s", trait_label(trait), model_label(md), lead), cex.main = 0.95)
+    abline(h = w$thr[1], lty = 2, col = "red")
+    points(lead_pos/1e6, w[Marker == lead, Score][1], pch = 23, bg = "purple", cex = 1.8)
+    legend("topright", c("r2 0-.2",".2-.4",".4-.6",".6-.8",".8-1","lead"), pch = c(19,19,19,19,19,23),
+           col = c("grey65","#4575b4","#66bd63","#fdae61","#d73027","black"), pt.bg = c(NA,NA,NA,NA,NA,"purple"), cex = 0.7, bty = "n", ncol = 2)
+    par(mar = c(4, 4.6, 0.3, 1))
+    plot(NA, xlim = c(lo, hi)/1e6, ylim = c(0, 3), yaxt = "n", ylab = "", xlab = sprintf("%s position (Mb)", chrom), bty = "n")
+    if (nrow(ge1)) {
+      ge1 <- ge1[order(Start)]; ge1[, row := rep_len(c(2.2, 1.2, 0.2), .N)]
+      for (i in seq_len(nrow(ge1))) {
+        s <- max(ge1$Start[i], lo)/1e6; e <- min(ge1$End[i], hi)/1e6; y <- ge1$row[i]
+        hit <- ge1$Start[i] <= lead_pos && ge1$End[i] >= lead_pos
+        rect(s, y, e, y + 0.45, col = if (hit) "purple" else "grey40", border = NA)
+        lab <- ge1$AT_desc[i]; lab <- if (is.na(lab)) ge1$Gene[i] else substr(lab, 1, 28)
+        text((s + e)/2, y + 0.75, lab, cex = 0.45, srt = 0)
+      }
+    }
+    dev.off()
+  }
+
+  ## ---- loop over loci: best run per locus, plus every listed run ----
+  cand <- list()
+  for (i in seq_len(nrow(loci))) {
+    L <- loci[i]; runs <- pk[Locus == L$Locus][order(-Score)]
+    for (j in seq_len(min(nrow(runs), TOP_RUNS_PER_LOCUS))) {
+      r <- runs[j]
+      fp <- file.path(lz_dir, "LocusZoom", sprintf("%s__%s_%s_%s.png", L$LocusID, r$Trait, r$Model, r$CovSet))
+      if (REDRAW || !file.exists(fp)) zoom_plot(r$Chrom, r$PeakMarker, r$Position, r$CovSet, r$Trait, r$Model, fp)
+    }
+    ## candidate genes: genes overlapping/near the significant interval of this locus
+    sm <- sig[Chrom == L$Chrom & Position >= L$MinPos - 1e6 & Position <= L$MaxPos + 1e6]
+    lo <- min(L$LeadPos, sm$Position) - GENE_WIN; hi <- max(L$LeadPos, sm$Position) + GENE_WIN
+    ge <- an[Chr == L$Chrom & End >= lo & Start <= hi]
+    if (nrow(ge)) {
+      ge <- ge[, .SD[1], by = Gene]
+      ge[, `:=`(Locus = L$LocusID, LeadSNP = L$Lead, LeadPos = L$LeadPos, BestScore = L$BestScore,
+                Dist_to_lead_bp = ifelse(Start <= L$LeadPos & End >= L$LeadPos, 0, pmin(abs(Start - L$LeadPos), abs(End - L$LeadPos))),
+                Contains_lead = Start <= L$LeadPos & End >= L$LeadPos,
+                nSigMarkersInGene = sapply(seq_len(.N), function(k) sum(sm$Position >= Start[k] & sm$Position <= End[k])),
+                Runs_supporting = paste(unique(runs$Trait), collapse = ", "))]
+      cand[[i]] <- ge
+    }
+  }
+  cg <- rbindlist(cand, fill = TRUE)
+  cg <- cg[, .(Locus, Gene, Protein_ID = ID, Chrom = Chr, Start, End, Strand, Dist_to_lead_bp, Contains_lead, nSigMarkersInGene,
+               LeadSNP, LeadPos, BestScore, Runs_supporting, Araport11 = AT_match, Araport11_desc = AT_desc,
+               SwissProt = SP_match, SwissProt_desc = SP_desc, nr_desc = sub("<>.*", "", nr_desc), RefSeq = RS_match)]
+  setorder(cg, -BestScore, Locus, Dist_to_lead_bp)
+
+  ## ---- top SNP table per trait x covariate set (across experiments) ----
+  top_snp <- pk[, .SD[which.max(Score)], by = .(CovSet, Trait)][order(-Score)]
+  top_snp[, GeneContainingSNP := vapply(seq_len(.N), function(k) {
+    g <- an[Chr == Chrom[k] & Start <= Position[k] & End >= Position[k]]
+    if (!nrow(g)) "intergenic (no gene model spans SNP)" else paste(unique(sub("\\.t[0-9]+$", "", g$ID)), collapse = "; ") }, "")]
+  lam <- fread(file.path(sumdir, "Genomic_inflation_and_threshold_by_trait_model.csv"))
+  top_snp <- merge(top_snp, lam[, .(CovSet, Trait, Model, Lambda)], by = c("CovSet","Trait","Model"), all.x = TRUE)
+  setorder(top_snp, -Score)
+
+  wb <- createWorkbook(); hs <- createStyle(textDecoration = "bold", fgFill = "#305496", fontColour = "white")
+  add <- function(nm, x) { addWorksheet(wb, nm); writeData(wb, nm, x, headerStyle = hs); freezePane(wb, nm, firstRow = TRUE); setColWidths(wb, nm, 1:ncol(x), "auto") }
+  fwrite(cg, file.path(lz_dir, "Candidate_genes.csv")); fwrite(top_snp, file.path(lz_dir, "Top_SNP_per_run.csv"))
+  add("Top_SNP_per_run", top_snp); add("Loci", loci); add("Candidate_genes", cg)
+  saveWorkbook(wb, file.path(lz_dir, "Candidate_genes_from_GWAS_peaks.xlsx"), overwrite = TRUE)
+  cat("Done. Output in", lz_dir, "\n")
+
+}
+
+# ############################################################
+# STAGE 5: ROBUSTNESS CHECKS FOR THE LEAD LOCUS (Ra01:725,408)
+#   PF adjustment, class members + relatedness, leave-one-out, Mann-Whitney, permutation thresholds.
+#   Runs on the check-adjusted BLUEs written by stage 1. Output: Final_Output/10_Robustness/
+#   PF calls are built into the script (PF1 below). Everything is inside local() so it
+#   cannot overwrite variables used by the other stages.
+# ############################################################
+if (RUN_ROBUST) local({
+  perm_csv <- file.path(root_dir, "10_Robustness", "Permutation_thresholds.csv")
+  perm_ok  <- file.exists(perm_csv) && file.size(perm_csv) > 20          # an empty file (interrupted run) does not count
+  if (!FORCE_RERUN && file.exists(file.path(root_dir, "10_Robustness", "Leave_one_out_lead_score.csv")) && (perm_ok || !RUN_PERM)) {
+    cat("STAGE 5 skipped: robustness results already exist in 10_Robustness (FORCE_RERUN <- TRUE to redo).\n"); return(invisible())
+  }
+  suppressPackageStartupMessages(library(data.table))
+  {
+    # ---------------- USER SETTINGS ----------------
+    work_dir   <- "C:/Users/RhysB/OneDrive/Desktop/CH2 GWAS"
+    pheno_file <- file.path(work_dir, "LowChillGWAS/Final_Output/06_GWASpoly_Input/pheno_GWASpoly_LowChill_BLUEs.csv")
+    geno_file  <- file.path(work_dir, "Overlap_CaptureSeq_FlexSeq_SharedMarkers_GWASready.csv")
+    out_dir    <- file.path(work_dir, "LowChillGWAS/Final_Output/10_Robustness")
+    LEAD       <- "Ra01:725408_C/G"
+    LEAD_MODEL <- "1-dom-ref"
+    TRAITS     <- c("BLUE_149", "BLUE_225", "BLUE_257", "BLUE_379")   # single-experiment BLUEs
+    THR        <- c("additive" = 4.86, "1-dom-alt" = 4.19, "1-dom-ref" = 4.78)   # M.eff thresholds from your GWASpoly run
+    DUP5       <- c("A_2932TN", "APF_477T", "APF_488T", "APF_489T", "APF_499T") # Seq Names present in two lug sets
+    thr_f <- file.path(work_dir, "LowChillGWAS/Final_Output/08_GWAS/09_Summary_Tables/Genomic_inflation_and_threshold_by_trait_model.csv")   # thresholds from the rerun above
+    if (file.exists(thr_f)) { tt <- fread(thr_f)[CovSet == "K_only" & Trait == "BLUE_149"]; if (nrow(tt) == 3) { THR <- setNames(tt$Threshold, tt$Model); cat("M.eff thresholds taken from the GWAS rerun:", paste(names(THR), round(THR, 2), collapse = ", "), "\n") } }
+    PERM_TRAITS <- c("BLUE_149", "BLUE_225")
+    N_PERM     <- 1000
+    N_RANDOM_SETS <- 5000
+    MAF <- 0.05; GENO_FREQ <- 0.95
+    set.seed(20261103)
+    # ------------------------------------------------
+
+    dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+    sink(file.path(out_dir, "robustness_log.txt"), split = TRUE)
+    CHR <- paste0("Ra0", 1:7); MODELS <- c("additive", "1-dom-alt", "1-dom-ref")
+
+    # ---------- read data (same cleaning as the GWAS script) ----------
+    ph <- fread(pheno_file); setnames(ph, 1, "Genotype")
+    G <- fread(geno_file, header = TRUE, check.names = FALSE); names(G)[1:3] <- c("Marker", "Chrom", "Position")
+    G <- G[Chrom %in% CHR]; G <- G[!duplicated(paste(Chrom, Position))]
+    ph <- ph[Genotype %in% names(G)]
+    panel <- sort(ph$Genotype)
+    ph <- ph[match(panel, Genotype)]
+    X <- as.matrix(G[, ..panel]); storage.mode(X) <- "numeric"
+    X <- pmin(pmax(round(X), 0), 4)
+    for (i in which(rowSums(is.na(X)) > 0)) {                      # impute missing with the population mode
+      v <- X[i, ]; tb <- table(v); X[i, is.na(v)] <- as.numeric(names(tb)[which.max(tb)])
+    }
+    chrom <- G$Chrom; pos <- G$Position; mname <- G$Marker
+    sdv <- sqrt(pmax(rowMeans(X^2) - rowMeans(X)^2, 0)); poly <- sdv > 0
+    n_all <- length(panel)
+    PF1 <- PF_GENOTYPES   # primocane-fruiting calls are defined once near the top of the script
+    PF <- as.integer(panel %in% PF1)
+    cat("Panel:", n_all, "genotypes |", nrow(X), "markers | PF =", sum(PF == 1, na.rm = TRUE), "FF =", sum(PF == 0, na.rm = TRUE),
+        "PF unknown =", sum(is.na(PF)), "\n")
+    lead_i <- match(LEAD, mname); stopifnot(!is.na(lead_i))
+
+    # ---------- kinship (Endelman A.mat, ploidy 4) and LOCO ----------
+    amat <- function(Xm) {
+      Z <- Xm * 0.5 - 1; p <- (rowMeans(Z) + 1) / 2
+      W <- t(Z - 2 * (p - 0.5)); cc <- 2 * sum(p * (1 - p))
+      tcrossprod(W) / cc
+    }
+    KM <- lapply(CHR, function(ch) amat(X[chrom != ch & poly, , drop = FALSE])); names(KM) <- CHR
+    K_ALL <- amat(X[poly, , drop = FALSE])
+    rownames(K_ALL) <- colnames(K_ALL) <- panel
+
+    # ---------- marker coding and filters (evaluated on ALL panel genotypes, as GWASpoly does) ----------
+    code_m <- function(Xm, m) switch(m, "additive" = Xm, "1-dom-alt" = (Xm >= 1) * 1, "1-dom-ref" = (Xm <= 3) * 1)
+    af <- rowMeans(X) / 4
+    FILT <- lapply(MODELS, function(m) {
+      ok <- pmin(af, 1 - af) >= MAF & poly
+      if (m == "additive") mx <- pmax(rowMeans(X == 0), rowMeans(X == 1), rowMeans(X == 2), rowMeans(X == 3), rowMeans(X == 4))
+      else { f1 <- rowMeans(code_m(X, m)); mx <- pmax(f1, 1 - f1) }
+      ok & mx <= GENO_FREQ
+    }); names(FILT) <- MODELS
+    cat("Markers passing filters:", paste(MODELS, sapply(FILT, sum), collapse = " | "), "\n")
+
+    # ---------- P3D scan with optional fixed covariates; rotated markers are cached ----------
+    reml_delta <- function(yt, lam, Xt) {
+      n <- length(yt); p <- ncol(Xt)
+      nll <- function(ld) {
+        d <- exp(ld); w <- 1 / (lam + d); XtWX <- crossprod(Xt * w, Xt)
+        b <- solve(XtWX, crossprod(Xt * w, yt)); r <- yt - Xt %*% b; vg <- sum(w * r^2) / (n - p)
+        0.5 * ((n - p) * log(vg) + sum(log(lam + d)) + as.numeric(determinant(XtWX, logarithm = TRUE)$modulus))
+      }
+      exp(optimize(nll, c(-12, 12), tol = 1e-6)$minimum)
+    }
+    make_scanner <- function(ok, Z = NULL, models = MODELS) {
+      n <- sum(ok); Xf <- cbind(rep(1, n), if (is.null(Z)) NULL else as.matrix(Z)[ok, , drop = FALSE])
+      ch <- lapply(CHR, function(cc) {
+        sel <- which(chrom == cc)
+        e <- eigen(KM[[cc]][ok, ok], symmetric = TRUE); lam <- pmax(e$values, 0); U <- e$vectors
+        d <- list(sel = sel, lam = lam, U = U, Xt = crossprod(U, Xf))
+        for (m in models) {
+          good <- which(FILT[[m]][sel])
+          d[[m]] <- list(good = good, Ct = code_m(X[sel[good], ok, drop = FALSE], m) %*% U)
+        }
+        d
+      }); names(ch) <- CHR
+      list(ok = ok, n = n, ch = ch, models = models, q = ncol(Xf))
+    }
+    scan_with <- function(S, y_ok, fixed_delta = NULL) {            # y_ok = phenotype for the genotypes in S$ok
+      out <- lapply(S$models, function(m) rep(NA_real_, length(mname))); names(out) <- S$models
+      deltas <- numeric(length(CHR)); names(deltas) <- CHR
+      for (cc in CHR) {
+        d <- S$ch[[cc]]; yt <- as.numeric(crossprod(d$U, y_ok))
+        dl <- if (is.null(fixed_delta)) reml_delta(yt, d$lam, d$Xt) else fixed_delta[[cc]]; deltas[cc] <- dl
+        sw <- sqrt(1 / (d$lam + dl)); Q <- qr.Q(qr(d$Xt * sw))
+        ys <- yt * sw; yp <- ys - Q %*% crossprod(Q, ys); yy <- sum(yp^2); dfe <- S$n - S$q - 1
+        for (m in S$models) {
+          g <- d[[m]]; if (length(g$good) == 0) next
+          Xs <- g$Ct * rep(sw, each = nrow(g$Ct)); Xp <- Xs - (Xs %*% Q) %*% t(Q)
+          xx <- rowSums(Xp^2); xy <- as.numeric(Xp %*% yp); b <- xy / xx; rss <- yy - b * xy
+          F <- b^2 * xx / (rss / dfe)
+          out[[m]][d$sel[g$good]] <- -pf(F, 1, dfe, lower.tail = FALSE, log.p = TRUE) / log(10)
+        }
+      }
+      out
+    }
+    run_scan <- function(y, Z = NULL, models = MODELS) {            # y = full-panel vector with NA for missing
+      ok <- !is.na(y) & (if (is.null(Z)) TRUE else complete.cases(Z))
+      S <- make_scanner(ok, Z, models); list(S = S, scores = scan_with(S, y[ok]), ok = ok)
+    }
+    lead_score <- function(xcode, y, Z = NULL, chr = "Ra01") {       # single marker, arbitrary 0/1 coding
+      ok <- !is.na(y) & (if (is.null(Z)) TRUE else complete.cases(Z)); n <- sum(ok)
+      Xf <- cbind(rep(1, n), if (is.null(Z)) NULL else as.matrix(Z)[ok, , drop = FALSE])
+      e <- eigen(KM[[chr]][ok, ok], symmetric = TRUE); lam <- pmax(e$values, 0); U <- e$vectors
+      yt <- as.numeric(crossprod(U, y[ok])); Xt <- crossprod(U, Xf); dl <- reml_delta(yt, lam, Xt)
+      sw <- sqrt(1 / (lam + dl)); Q <- qr.Q(qr(Xt * sw)); yp <- yt * sw; yp <- yp - Q %*% crossprod(Q, yp)
+      xp <- as.numeric(crossprod(U, xcode[ok])) * sw; xp <- xp - Q %*% crossprod(Q, xp)
+      xx <- sum(xp^2); xy <- sum(xp * yp); b <- xy / xx; q <- ncol(Xf); F <- b^2 * xx / ((sum(yp^2) - b * xy) / (n - q - 1))
+      -pf(F, 1, n - q - 1, lower.tail = FALSE, log.p = TRUE) / log(10)
+    }
+    top_of <- function(sc) rbindlist(lapply(names(sc), function(m) { i <- which.max(sc[[m]]); data.table(Model = m, TopScore = round(sc[[m]][i], 2), TopMarker = mname[i], nAboveMEff = sum(sc[[m]] >= THR[m], na.rm = TRUE)) }))
+    lambda_gc <- function(s) { s <- s[is.finite(s)]; median(qchisq(10^(-s), 1, lower.tail = FALSE)) / qchisq(0.5, 1) }
+    res_rows <- list()
+    add_res <- function(Trait, Analysis, sc, n) {
+      t <- top_of(sc); t[, `:=`(Trait = Trait, Analysis = Analysis, n = n, LeadScore = round(sc[["1-dom-ref"]][lead_i], 2))]
+      res_rows[[length(res_rows) + 1]] <<- t
+    }
+
+    # ============================================================
+    # A. REPRODUCE THE GWAS (validation against your GWASpoly output)
+    # ============================================================
+    cat("\n================ A. VALIDATION ================\n")
+    blue <- function(tr) ph[[tr]]
+    base <- list()
+    for (tr in TRAITS) {
+      r <- run_scan(blue(tr)); base[[tr]] <- r; add_res(tr, "baseline", r$scores, sum(r$ok))
+      cat(tr, "| n =", sum(r$ok), "| lead (", LEAD_MODEL, ") =", round(r$scores[[LEAD_MODEL]][lead_i], 2),
+          "| lambda(additive) =", round(lambda_gc(r$scores$additive), 2), "\n")
+    }
+    cat("Compare these top markers and the lead score with the GWASpoly table 'Top_markers_per_trait_model.csv'.\n",
+        "Scores should agree to within about 0.5 (GWASpoly uses its own REML routine).\n")
+
+    # ============================================================
+    # B. WHO IS IN THE LEAD CLASS?
+    # ============================================================
+    cat("\n================ B. LEAD-MARKER CLASS ================\n")
+    x <- X[lead_i, ]
+    cat("Dosage counts over the panel:\n"); print(table(Dosage = x))
+    cat("\nDosage x fruiting habit (PF = 1):\n"); print(table(Dosage = x, PF = PF, useNA = "ifany"))
+    tab2 <- table(Class4 = x == 4, PF = PF == 1); print(fisher.test(tab2))
+    members <- data.table(Seq = panel, Dosage = x, PF = PF)[Dosage == 4]
+    for (tr in TRAITS) set(members, j = tr, value = round(ph[[tr]][match(members$Seq, panel)], 1))
+    fwrite(members, file.path(out_dir, "Lead_class_members.csv")); print(members, nrows = 100)
+
+    mean_off <- function(idx) { S <- K_ALL[idx, idx, drop = FALSE]; n <- length(idx); (sum(S) - sum(diag(S))) / (n * (n - 1)) }
+    cat("\nRelatedness among class members vs random same-size sets of PF genotypes (per experiment):\n")
+    rel_rows <- list()
+    for (tr in TRAITS) {
+      inexp <- which(!is.na(ph[[tr]])); mem <- intersect(which(x == 4), inexp); pool <- intersect(which(PF == 1), inexp)
+      if (length(mem) < 3) next
+      obs <- mean_off(mem); rnd <- replicate(N_RANDOM_SETS, mean_off(sample(pool, length(mem))))
+      rel_rows[[tr]] <- data.table(Trait = tr, nClass = length(mem), MeanRelationship = round(obs, 3),
+                                   RandomPF_Mean = round(mean(rnd), 3), P_random_ge_obs = mean(rnd >= obs))
+    }
+    rel <- rbindlist(rel_rows); print(rel); fwrite(rel, file.path(out_dir, "Class_relatedness_vs_random_PF_sets.csv"))
+
+    # ============================================================
+    # C. SENSITIVITY SCANS
+    # ============================================================
+    cat("\n================ C. SENSITIVITY SCANS ================\n")
+    for (tr in TRAITS) {
+      y <- blue(tr)
+      yd <- y; yd[panel %in% DUP5] <- NA
+      r <- run_scan(yd);                 add_res(tr, "drop 5 duplicated genotypes", r$scores, sum(r$ok))
+      r <- run_scan(y, Z = PF);          add_res(tr, "PF as fixed covariate", r$scores, sum(r$ok))
+      yf <- y; yf[is.na(PF) | PF != 1] <- NA
+      r <- run_scan(yf);                 add_res(tr, "PF lines only", r$scores, sum(r$ok))
+    }
+    res <- rbindlist(res_rows)[, .(Trait, Analysis, n, Model, TopScore, TopMarker, nAboveMEff, LeadScore)]
+    fwrite(res, file.path(out_dir, "Sensitivity_scans_summary.csv"))
+    print(res[order(Trait, Analysis, Model)], nrows = 500)
+
+    # ============================================================
+    # D + E. LEAVE-ONE-OUT AND MANN-WHITNEY
+    # ============================================================
+    cat("\n================ D/E. LEAVE-ONE-OUT AND MANN-WHITNEY ================\n")
+    xc <- as.numeric(x <= 3)       # 1-dom-ref coding: 1 = dosage 0-3, 0 = dosage 4
+    loo_rows <- list()
+    for (tr in c("BLUE_149", "BLUE_225", "BLUE_257")) {
+      y <- blue(tr); ok <- !is.na(y); mem <- which(ok & x == 4); if (length(mem) < 3) next
+      base_s <- lead_score(xc, y)
+      cat(sprintf("\n%s: class n = %d, baseline lead score %.2f\n", tr, length(mem), base_s))
+      wt <- suppressWarnings(wilcox.test(y[ok & x == 4], y[ok & x < 4]))
+      cat(sprintf("  Mann-Whitney class vs all others: p = %.2g (medians %.1f vs %.1f)\n", wt$p.value, median(y[ok & x == 4]), median(y[ok & x < 4])))
+      okp <- ok & !is.na(PF) & PF == 1
+      if (sum(okp & x == 4) >= 3) {
+        wp <- suppressWarnings(wilcox.test(y[okp & x == 4], y[okp & x < 4]))
+        cat(sprintf("  Mann-Whitney within PF lines only: p = %.2g (class n = %d vs %d)\n", wp$p.value, sum(okp & x == 4), sum(okp & x < 4)))
+      }
+      for (i in mem) { y2 <- y; y2[i] <- NA
+        loo_rows[[length(loo_rows) + 1]] <- data.table(Trait = tr, Dropped = panel[i], BLUE = round(y[i], 1), LeadScore = round(lead_score(xc, y2), 2)) }
+      ord <- mem[order(-y[mem])]
+      for (k in 1:3) { y2 <- y; y2[ord[1:k]] <- NA
+        loo_rows[[length(loo_rows) + 1]] <- data.table(Trait = tr, Dropped = paste("top", k, "highest-BLUE members:", paste(panel[ord[1:k]], collapse = "+")),
+                                                       BLUE = NA_real_, LeadScore = round(lead_score(xc, y2), 2)) }
+    }
+    loo <- rbindlist(loo_rows); print(loo, nrows = 200); fwrite(loo, file.path(out_dir, "Leave_one_out_lead_score.csv"))
+
+    # ============================================================
+    # F. WHITENED-RESIDUAL PERMUTATION (empirical genome-wide threshold)
+    # ============================================================
+    cat("\n================ F. PERMUTATION THRESHOLDS (", N_PERM, "permutations ) ================\n", sep = "")
+    perm_rows <- list()
+    if (!RUN_PERM) cat("Skipped: RUN_PERM is FALSE (optional; set TRUE near the top of the script to run).\n")
+    for (tr in if (RUN_PERM) PERM_TRAITS else character(0)) for (adj in c("none", "PF")) {
+      y <- blue(tr); Z <- if (adj == "PF") PF else NULL
+      ok <- !is.na(y) & (if (is.null(Z)) TRUE else !is.na(Z))
+      S <- make_scanner(ok, Z); obs <- scan_with(S, y[ok])
+      e <- eigen(K_ALL[ok, ok], symmetric = TRUE); lam <- pmax(e$values, 0); U <- e$vectors
+      Xf <- cbind(rep(1, sum(ok)), if (is.null(Z)) NULL else Z[ok]); Xt <- crossprod(U, Xf); yt <- as.numeric(crossprod(U, y[ok]))
+      dl <- reml_delta(yt, lam, Xt); w <- 1 / (lam + dl)
+      b <- solve(crossprod(Xt * w, Xt), crossprod(Xt * w, yt)); fit <- as.numeric(Xt %*% b); r <- sqrt(w) * (yt - fit)
+      mx <- matrix(NA_real_, N_PERM, length(MODELS), dimnames = list(NULL, MODELS))
+      t0 <- Sys.time()
+      for (k in seq_len(N_PERM)) {
+        ys <- as.numeric(U %*% (fit + sample(r) / sqrt(w)))
+        sc <- scan_with(S, ys); mx[k, ] <- sapply(MODELS, function(m) max(sc[[m]], na.rm = TRUE))
+      }
+      allmax <- apply(mx, 1, max)
+      cat(sprintf("\n%s | covariate: %s | n = %d | %.0f s\n", tr, adj, S$n, as.numeric(difftime(Sys.time(), t0, units = "secs"))))
+      for (m in MODELS) {
+        o <- max(obs[[m]], na.rm = TRUE)
+        perm_rows[[length(perm_rows) + 1]] <- data.table(Trait = tr, Covariate = adj, Model = m, ObservedTop = round(o, 2),
+          EmpThreshold95 = round(quantile(mx[, m], 0.95), 2), MEffThreshold = THR[m], EmpP_top = (1 + sum(mx[, m] >= o)) / (N_PERM + 1))
+      }
+      lead_o <- obs[[LEAD_MODEL]][lead_i]
+      perm_rows[[length(perm_rows) + 1]] <- data.table(Trait = tr, Covariate = adj, Model = "ANY model (family-wise)", ObservedTop = round(lead_o, 2),
+          EmpThreshold95 = round(quantile(allmax, 0.95), 2), MEffThreshold = NA_real_, EmpP_top = (1 + sum(allmax >= lead_o)) / (N_PERM + 1))
+      fwrite(rbindlist(perm_rows), file.path(out_dir, "Permutation_thresholds.csv"))      # saved after every trait/covariate so an interruption loses nothing
+    }
+    if (length(perm_rows)) { perm <- rbindlist(perm_rows); print(perm) }
+    cat("\nNote: the permutation null uses whole-genome kinship for whitening while the scan uses LOCO kinship, and the BLUEs are skewed,\n",
+        "so null lambda is above 1; the empirical thresholds are conservative. Report them as a sensitivity analysis, not a replacement for M.eff.\n")
+    cat("\nDone. Files are in:", out_dir, "\n")
+    sink()
+  }
+})
+
+# ############################################################
+# STAGE 6: CORRELATION FIGURE + MARKER DENSITY MAPS
+#   Fig1 correlation figure in the style of Godwin et al. 2025 (density on the diagonal, Pearson r with stars above, scatter below)
+#   Marker density maps (Mason's style, 1 Mb bins) for the Flex-Seq file, the overlap panel, and the gene models.
+#   Output: 05_Figures/Fig1_Budbreak_BLUEs_correlation.png and 12_Marker_Density_Maps/. Each file is skipped if it already exists.
+# ############################################################
+flex_file <- file.path(work_dir, "FlexSeq_2026_ARK133905_TetraploidPostmean_NOFILTER.csv")
+MAKE_FLEX_MAP <- FALSE    # the two thesis figures are the overlap marker density map and the gene density map; set TRUE to also draw the unfiltered Flex-Seq map
+if (RUN_FIGS) local({
+  suppressPackageStartupMessages(library(data.table))
+  need <- function(f) REDRAW || !file.exists(f)
+  png_cairo <- function(file, w, h) { if (capabilities("cairo")) png(file, width = w, height = h, units = "in", res = 600, type = "cairo") else png(file, width = w, height = h, units = "in", res = 600) }
+  fig_dir <- file.path(root_dir, "05_Figures"); den_dir <- file.path(root_dir, "12_Marker_Density_Maps")
+  dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE); dir.create(den_dir, recursive = TRUE, showWarnings = FALSE)
+
+  # ---------- correlation figure ----------
+  f1 <- file.path(fig_dir, "Fig1_Budbreak_BLUEs_correlation.png")
+  bl <- file.path(root_dir, "06_GWASpoly_Input/pheno_GWASpoly_LowChill_BLUEs.csv")
+  if (need(f1) && file.exists(bl)) {
+    ph <- fread(bl); setnames(ph, 1, "Genotype")
+    cols <- intersect(c("BLUE_149", "BLUE_225", "BLUE_257", "BLUE_379", "BLUE_ALL4"), names(ph))
+    df <- as.data.frame(ph)[, cols, drop = FALSE]
+    names(df) <- ifelse(cols == "BLUE_ALL4", "All four", paste0(sub("BLUE_", "", cols), " h"))
+    if (requireNamespace("GGally", quietly = TRUE) && requireNamespace("ggplot2", quietly = TRUE)) {
+      p <- suppressWarnings(GGally::ggpairs(df, progress = FALSE,
+             upper = list(continuous = GGally::wrap("cor", method = "pearson", size = 4)),
+             lower = list(continuous = GGally::wrap("points", size = 0.9, colour = "#0072B2", alpha = 0.6)),          # Okabe-Ito blue (colourblind safe)
+             diag  = list(continuous = GGally::wrap("densityDiag", colour = "#0072B2", fill = "#56B4E9", alpha = 0.5))))
+      ok <- tryCatch({ suppressWarnings(ggplot2::ggsave(f1, p, width = 9, height = 9, dpi = 600, type = "cairo")); TRUE }, error = function(e) FALSE)
+      if (!ok) suppressWarnings(ggplot2::ggsave(f1, p, width = 9, height = 9, dpi = 600))
+    } else {
+      cat("GGally/ggplot2 not installed (install.packages(c('GGally','ggplot2'))): drew a base-R version instead.\n")
+      png_cairo(f1, 9, 9)
+      pairs(df, upper.panel = function(x, y, ...) { ok <- is.finite(x) & is.finite(y); r <- cor(x[ok], y[ok])
+              usr <- par("usr"); on.exit(par(usr = usr)); par(usr = c(0, 1, 0, 1)); text(0.5, 0.5, sprintf("Corr:\n%.2f", r), cex = 1.4) },
+            diag.panel = function(x, ...) { usr <- par("usr"); on.exit(par(usr = usr)); d <- density(x[is.finite(x)]); par(usr = c(usr[1:2], 0, max(d$y) * 1.1)); lines(d, col = "#0072B2") },
+            pch = 16, cex = 0.5, gap = 0.3, col = adjustcolor("#0072B2", 0.6))
+      dev.off()
+    }
+    cat("Wrote", f1, "\n")
+  } else cat("Correlation figure skipped (already exists or BLUE file missing).\n")
+
+  # ---------- labelled copy of the BLUE file for sharing (the analysis file keeps its short names) ----------
+  f_lab <- file.path(root_dir, "06_GWASpoly_Input", "Budbreak_BLUEs_by_genotype_labeled.csv")
+  if (need(f_lab) && file.exists(bl)) {
+    lab <- fread(bl); setnames(lab, 1, "Genotype")
+    nm <- c(BLUE_149 = "Budbreak BLUE (%), 149 h chill", BLUE_225 = "Budbreak BLUE (%), 225 h chill", BLUE_257 = "Budbreak BLUE (%), 257 h chill", BLUE_379 = "Budbreak BLUE (%), 379 h chill",
+            BLUE_ALL4 = "Budbreak BLUE (%), all four experiments combined", BLUE_EXP3_225_257_379 = "Budbreak BLUE (%), 225 + 257 + 379 h combined", BLUE_EXP2_225_257 = "Budbreak BLUE (%), 225 + 257 h combined",
+            BREAK_149 = "Broke bud? 149 h chill (1 = yes, 0 = no)", BREAK_225 = "Broke bud? 225 h chill (1 = yes, 0 = no)", BREAK_257 = "Broke bud? 257 h chill (1 = yes, 0 = no)", BREAK_379 = "Broke bud? 379 h chill (1 = yes, 0 = no)",
+            BREAK_225_257 = "Broke bud? at 225 h or 257 h (1 = yes, 0 = no)", BREAK_ANY = "Broke bud? in any experiment (1 = yes, 0 = no)", BREAK_PROP = "Proportion of experiments with budbreak (0 to 1)")
+    keep <- intersect(names(nm), names(lab)); lab <- lab[, c("Genotype", keep), with = FALSE]
+    setnames(lab, keep, unname(nm[keep]))
+    for (j in grep("^Budbreak BLUE|^Proportion", names(lab), value = TRUE)) set(lab, j = j, value = round(lab[[j]], 2))
+    fwrite(lab, f_lab); cat("Wrote", f_lab, "\n")
+  }
+
+  # ---------- BLUE histograms, floricane- vs primocane-fruiting genotypes in two colours ----------
+  f2 <- file.path(fig_dir, "Fig2_BLUE_histograms_PF_vs_FF.png")
+  if (need(f2) && file.exists(bl)) {
+    ph <- fread(bl); setnames(ph, 1, "Genotype")
+    ph[, Habit := ifelse(Genotype %in% PF_GENOTYPES, "PF", "FF")]
+    hcols <- intersect(c("BLUE_149", "BLUE_225", "BLUE_257", "BLUE_379", "BLUE_ALL4"), names(ph))
+    ttl <- function(cl) if (cl == "BLUE_ALL4") "All four experiments" else sprintf("%s h chill", sub("BLUE_", "", cl))
+    colFF <- "#0072B2"; colPF <- "#E69F00"                                  # Okabe-Ito blue and orange (colourblind safe)
+    png_cairo(f2, 10, 7); par(mfrow = c(2, 3), mar = c(4.5, 4.5, 3, 1))
+    for (cl in hcols) {
+      v <- ph[[cl]]; ok <- is.finite(v); brk <- pretty(range(v[ok]), 25)
+      hf <- hist(v[ok & ph$Habit == "FF"], breaks = brk, plot = FALSE); hp <- hist(v[ok & ph$Habit == "PF"], breaks = brk, plot = FALSE)
+      plot(NA, xlim = range(brk), ylim = c(0, max(hf$counts + hp$counts) * 1.08), xlab = paste0(BLUE_NAME, " (% budbreak)"), ylab = "Number of genotypes",
+           main = sprintf("%s, n = %d", ttl(cl), sum(ok)), las = 1)
+      rect(brk[-length(brk)], 0, brk[-1], hf$counts, col = colFF, border = "white")                       # FF at the bottom
+      rect(brk[-length(brk)], hf$counts, brk[-1], hf$counts + hp$counts, col = colPF, border = "white")    # PF stacked on top
+      legend("topright", legend = c(sprintf("Floricane-fruiting (n = %d)", sum(ok & ph$Habit == "FF")), sprintf("Primocane-fruiting (n = %d)", sum(ok & ph$Habit == "PF"))),
+             fill = c(colFF, colPF), border = NA, bty = "n", cex = 0.85)
+    }
+    dev.off()
+    cat("Wrote", f2, "\n")
+  } else cat("PF/FF histogram figure skipped (already exists or BLUE file missing).\n")
+
+  # ---------- marker density maps ----------
+  BIN <- 1e6
+  CHR <- sprintf("Ra%02d", 1:7)
+  read_pos <- function(f) {                                           # first three columns = Marker, Chrom, Position (GWASpoly layout)
+    G <- fread(f, select = 1:3, header = TRUE, check.names = FALSE); setnames(G, 1:3, c("Marker", "Chrom", "Position"))
+    G[, Position := suppressWarnings(as.numeric(Position))]
+    bad <- !(G$Chrom %in% CHR) | is.na(G$Position)
+    if (any(bad)) {                                                   # fall back to parsing names such as Ra01:725408_C/G
+      m <- regmatches(G$Marker, regexec("^(Ra0[1-7])[:_.-]?([0-9]+)", G$Marker))
+      ok <- lengths(m) == 3
+      G[ok & bad, `:=`(Chrom = vapply(m[ok & bad], `[`, "", 2), Position = as.numeric(vapply(m[ok & bad], `[`, "", 3)))]
+    }
+    G[Chrom %in% CHR & is.finite(Position), .(Chrom, Position)]
+  }
+  maps <- list()
+  if (MAKE_FLEX_MAP && file.exists(flex_file))   maps[["FlexSeq_all_markers"]] <- list(pos = read_pos(flex_file), title = "Flex-Seq markers (unfiltered)")   else if (MAKE_FLEX_MAP) cat("Missing:", flex_file, "\n")
+  if (file.exists(marker_file)) maps[["Overlap_panel_markers"]] <- list(pos = read_pos(marker_file), title = "Marker density: overlap panel (used in the GWAS)") else cat("Missing:", marker_file, "\n")
+  if (file.exists(annot_file) && requireNamespace("readxl", quietly = TRUE)) {
+    an <- as.data.table(readxl::read_excel(annot_file, sheet = "Table S8", skip = 2, col_names = FALSE, .name_repair = "minimal")[-1, 1:4])
+    setnames(an, c("ID", "Chrom", "Start", "End")); an[, Position := (as.numeric(Start) + as.numeric(End)) / 2]
+    maps[["Gene_models"]] <- list(pos = an[Chrom %in% CHR & is.finite(Position), .(Chrom, Position)], title = "Gene density: 'Hillquist' gene models (one count per gene)")
+    chr_len <- an[Chrom %in% CHR, .(L = max(as.numeric(End), na.rm = TRUE)), by = Chrom]
+  } else chr_len <- NULL
+  if (length(maps)) {
+    L <- sapply(CHR, function(ch) max(unlist(lapply(maps, function(m) max(m$pos[Chrom == ch, Position], 0))), if (!is.null(chr_len)) chr_len[Chrom == ch, L] else 0))
+    xmax <- ceiling(max(L) / 5e6) * 5
+    pal  <- c("#F0F0F0", hcl.colors(11, "Viridis"))       # colourblind-safe: grey = no markers, then dark purple (few) to yellow (many)
+    fo <- file.path(den_dir, "Density_Markers_and_Genes.png")       # ONE figure: panel A = markers, panel B = genes (stacked, each with its own legend)
+    if (!need(fo)) cat("Skipped (exists):", fo, "\n") else {
+      np <- length(maps)
+      png_cairo(fo, 11, 5.2 * np)
+      layout(matrix(1:(2 * np), np, 2, byrow = TRUE), widths = c(10, 1.4))
+      for (k in seq_len(np)) {
+        nm <- names(maps)[k]; pos <- maps[[nm]]$pos
+        pos[, Bin := floor(Position / BIN)]
+        cnt <- pos[, .N, by = .(Chrom, Bin)]
+        mx <- max(cnt$N); step <- max(1, ceiling(mx / 10))
+        labs <- c("0", as.character(c(1, step * (1:9) + 1)), paste0(">", step * 10))
+        cls <- function(n) ifelse(n == 0, 1, pmin(12, 2 + floor((n - 1) / step)))
+        par(mar = c(1, 5, 5, 0.5))
+        plot(NA, xlim = c(0, xmax), ylim = c(7.6, 0.4), xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "", xaxs = "i")
+        axis(3, at = seq(0, xmax, 5), labels = paste0(seq(0, xmax, 5), "Mb"), cex.axis = 1.1)
+        axis(2, at = 1:7, labels = CHR, las = 1, tick = FALSE, cex.axis = 0.9)
+        for (i in 1:7) {
+          ch <- CHR[i]; nb <- ceiling(L[i] / BIN)
+          n <- rep(0L, nb); cc <- cnt[Chrom == ch]; n[cc$Bin + 1] <- cc$N
+          rect(((1:nb) - 1) * BIN / 1e6, i - 0.3, pmin((1:nb) * BIN, L[i]) / 1e6, i + 0.3, col = pal[cls(n)], border = NA)
+          rect(0, i - 0.3, L[i] / 1e6, i + 0.3, border = "grey70", col = NA)
+        }
+        mtext(paste0(LETTERS[k], ". ", sprintf("%s: %s in total, counted per %d Mb bin", maps[[nm]]$title, format(nrow(pos), big.mark = ","), BIN / 1e6)),
+              side = 3, line = 3, adj = 0, font = 2, cex = 1)
+        par(mar = c(1, 0, 5, 0)); plot.new()
+        legend("left", legend = labs, fill = pal, border = NA, bty = "n", y.intersp = 1.3, cex = 1.1, title = "Count per bin")
+        out <- cnt[order(Chrom, Bin), .(Chrom, Bin_start_bp = Bin * BIN, Bin_end_bp = (Bin + 1) * BIN, Count = N)]
+        fwrite(out, file.path(den_dir, paste0("Density_", nm, "_bin_counts.csv")))
+      }
+      dev.off()
+      cat("Wrote", fo, "\n")
+    }
+    writeLines(c("12_Marker_Density_Maps: Density_Markers_and_Genes.png (A = marker density, B = gene density) and *_bin_counts.csv (counts per 1 Mb bin).",
+                 "Chromosome lengths come from the annotation file (last gene end) or the last marker, whichever is larger."),
+               file.path(den_dir, "README.txt"))
+  }
+})
+
+# ############################################################
+# STAGE 7: FIELD EARLINESS vs LOW-CHILL PERFORMANCE
+#   Does a genotype that reaches budbreak earlier in the field also break bud with less chill in the forcing experiments?
+#   Field traits come from the audited field-earliness file (pheno_GWASpoly_Earliness_Final.csv: day of year, pooled over years with a genotype + year model;
+#   genotype names are already the marker-file names, so they match the low-chill BLUE file directly).
+#   A NEGATIVE correlation is expected: earlier field budbreak (smaller day of year) goes with a higher forced-budbreak BLUE.
+#   Output: 13_Field_Earliness_vs_LowChill/  (correlation table, binary-trait tests, merged data, scatter figure, calendar-date histograms)
+# ############################################################
+earliness_file <- file.path(work_dir, "FieldBudbreakGWAS/pheno_GWASpoly_Earliness_Final.csv")
+EARL_LABELS <- c(BB10_3yr = "Field 10% budbreak, 2024-2026 (day of year)", BB10_2025_2026 = "Field 10% budbreak, 2025-2026 (day of year)",
+                 BB90_2025_2026 = "Field 90% budbreak, 2025-2026 (day of year)", Jan08_0to3 = "January 8 bud score (0-3)", Jan22_0to3 = "January 22 bud score (0-3)")
+if (RUN_EARLINESS) local({
+  suppressPackageStartupMessages(library(data.table))
+  ed <- file.path(root_dir, "13_Field_Earliness_vs_LowChill"); dir.create(ed, recursive = TRUE, showWarnings = FALSE)
+  res_file <- file.path(ed, "Field_earliness_vs_lowchill_correlations.csv")
+  f_sc <- file.path(ed, "Fig_Field_earliness_vs_lowchill.png"); f_hi <- file.path(ed, "Fig_Field_budbreak_date_histograms.png")
+  if (!REDRAW && all(file.exists(res_file, f_sc, f_hi))) { cat("STAGE 7 skipped: results already exist (FORCE_RERUN <- TRUE to redo).\n"); return(invisible()) }
+  bl <- file.path(root_dir, "06_GWASpoly_Input/pheno_GWASpoly_LowChill_BLUEs.csv")
+  find_file <- function(f) {                                   # if the file is not where expected, look for the same file name anywhere under work_dir
+    if (file.exists(f)) return(f)
+    hit <- list.files(work_dir, pattern = paste0("^", gsub("([.])", "\\\\\\1", basename(f)), "$"), recursive = TRUE, full.names = TRUE)
+    if (length(hit)) { cat("Found", basename(f), "at", hit[1], "\n"); hit[1] } else f
+  }
+  ef <- find_file(earliness_file)
+  if (!file.exists(ef)) { cat("STAGE 7 skipped: cannot find", basename(earliness_file), "under", work_dir, "- set earliness_file (top of Stage 7) to its full path.\n"); return(invisible()) }
+  if (!file.exists(bl)) { cat("STAGE 7 skipped: the BLUE file", bl, "does not exist yet (run Stage 1).\n"); return(invisible()) }
+  ph <- fread(bl); setnames(ph, 1, "Genotype"); ph[, Genotype := trimws(Genotype)]
+  em <- fread(ef, na.strings = c("NA", "")); setnames(em, 1, "Genotype"); em[, Genotype := trimws(Genotype)]
+  tr_e <- intersect(names(EARL_LABELS), names(em))
+  if (!length(tr_e)) { cat("STAGE 7 skipped: none of", paste(names(EARL_LABELS), collapse = ", "), "found in", basename(ef), "\n"); return(invisible()) }
+  d <- merge(ph, em[, c("Genotype", "Field", tr_e), with = FALSE], by = "Genotype")
+  cat(sprintf("Field-earliness file: %d genotypes | low-chill BLUE file: %d genotypes | in both: %d\n", nrow(em), nrow(ph), nrow(d)))
+  cat("Low-chill genotypes with no field-earliness row:", paste(head(setdiff(ph$Genotype, em$Genotype), 30), collapse = ", "), "\n")
+  d[, PF := as.integer(Genotype %in% PF_GENOTYPES)]
+  fwrite(d, file.path(ed, "Field_earliness_and_lowchill_by_genotype.csv"))
+  one <- function(group, ltr, etr, x, y) {
+    ok <- is.finite(x) & is.finite(y); if (sum(ok) < 10) return(NULL)
+    sp <- suppressWarnings(cor.test(x[ok], y[ok], method = "spearman", exact = FALSE)); pe <- cor.test(x[ok], y[ok])
+    data.table(Group = group, LowChillTrait = trait_label(ltr), FieldTrait = EARL_LABELS[[etr]], n = sum(ok), Spearman = round(unname(sp$estimate), 3), Spearman_P = signif(sp$p.value, 3),
+               Pearson = round(unname(pe$estimate), 3), Pearson_P = signif(pe$p.value, 3))
+  }
+  cont <- intersect(c("BLUE_149", "BLUE_225", "BLUE_257", "BLUE_379", "BLUE_ALL4", "BLUE_EXP3_225_257_379", "BLUE_EXP2_225_257"), names(d))
+  out <- list()
+  for (ltr in cont) for (etr in tr_e) out[[length(out) + 1]] <- one("All genotypes", ltr, etr, d[[etr]], d[[ltr]])
+  for (g in c(0, 1)) if (sum(d$PF == g) >= 10) for (etr in tr_e)
+    out[[length(out) + 1]] <- one(if (g == 1) "Primocane-fruiting only" else "Floricane-fruiting only", "BLUE_ALL4", etr, d[[etr]][d$PF == g], d$BLUE_ALL4[d$PF == g])
+  res <- rbindlist(out); fwrite(res, res_file); cat("\nField earliness vs low-chill BLUEs (negative = earlier in the field goes with more forced budbreak):\n"); print(res, nrows = 500)
+  bin <- data.table()
+  for (ltr in intersect(c("BREAK_149", "BREAK_225", "BREAK_257", "BREAK_379", "BREAK_225_257", "BREAK_ANY"), names(d))) for (etr in tr_e) {
+    x1 <- d[[etr]][which(d[[ltr]] == 1)]; x0 <- d[[etr]][which(d[[ltr]] == 0)]; x1 <- x1[is.finite(x1)]; x0 <- x0[is.finite(x0)]
+    if (length(x1) > 4 && length(x0) > 4) bin <- rbind(bin, data.table(LowChillTrait = trait_label(ltr), FieldTrait = EARL_LABELS[[etr]], n_broke = length(x1), n_not = length(x0),
+        Mean_field_broke = round(mean(x1), 2), Mean_field_not = round(mean(x0), 2), Wilcoxon_P = signif(wilcox.test(x1, x0)$p.value, 3)))
+  }
+  fwrite(bin, file.path(ed, "Field_earliness_vs_binary_budbreak.csv")); cat("\nField earliness by did / did not break bud:\n"); print(bin, nrows = 200)
+
+  # ---- figure 1: scatter (field date vs forced budbreak); calendar dates on the field axis ----
+  pe <- if ("BB10_3yr" %in% tr_e) "BB10_3yr" else tr_e[1]
+  is_date <- pe %in% c("BB10_3yr", "BB10_2025_2026", "BB90_2025_2026")
+  png_cairo(f_sc, 6, 5); par(mar = c(4.8, 4.8, 3, 1))
+  cc <- ifelse(d$PF == 1, COL_PF, COL_FF); xr <- range(d[[pe]], na.rm = TRUE); tk <- doy_ticks(xr)
+  plot(d[[pe]], d$BLUE_ALL4, pch = 16, col = adjustcolor(cc, 0.6), cex = 0.8, xaxt = "n", ylab = paste0(BLUE_NAME, ", all four experiments (% budbreak)"),
+       xlab = if (is_date) "Field budbreak date (estimate over the recorded years)" else EARL_LABELS[[pe]], main = "Field earliness vs forced budbreak", las = 1)
+  if (is_date) axis(1, at = tk$at, labels = tk$lab, cex.axis = 0.8) else axis(1)
+  ok <- is.finite(d[[pe]]) & is.finite(d$BLUE_ALL4); if (sum(ok) > 5) abline(lm(d$BLUE_ALL4[ok] ~ d[[pe]][ok]), lwd = 1.5)
+  r1 <- res[Group == "All genotypes" & FieldTrait == EARL_LABELS[[pe]] & LowChillTrait == trait_label("BLUE_ALL4")]
+  legend("topright", bty = "n", cex = 0.9, legend = c(if (nrow(r1)) sprintf("Spearman = %.2f (n = %d)", r1$Spearman[1], r1$n[1]), "Primocane-fruiting", "Floricane-fruiting"),
+         pch = c(if (nrow(r1)) NA, 16, 16), col = c(if (nrow(r1)) NA, COL_PF, COL_FF))
+  dev.off()
+
+  # ---- figure 2: histograms with the calendar date on the x axis (top row = low-chill panel, bottom row = every genotype in the field file; PF stacked on FF) ----
+  date_hist <- function(v, hab, ttl) {
+    ok <- is.finite(v); v <- v[ok]; hab <- hab[ok]
+    brk <- seq(floor(min(v) / 3) * 3, ceiling(max(v) / 3) * 3 + 3, by = 3)               # 3-day bins
+    hf <- hist(v[hab == "FF"], breaks = brk, plot = FALSE); hp <- hist(v[hab == "PF"], breaks = brk, plot = FALSE)
+    plot(NA, xlim = range(brk), ylim = c(0, max(hf$counts + hp$counts) * 1.12), xaxt = "n", xlab = "", ylab = "Number of genotypes", main = sprintf("%s (n = %d)", ttl, length(v)), las = 1, cex.main = 0.95)
+    rect(brk[-length(brk)], 0, brk[-1], hf$counts, col = COL_FF, border = "white")
+    rect(brk[-length(brk)], hf$counts, brk[-1], hf$counts + hp$counts, col = COL_PF, border = "white")
+    tk2 <- doy_ticks(range(brk)); axis(1, at = tk2$at, labels = tk2$lab, las = 2, cex.axis = 0.8)
+    legend("topright", legend = c(sprintf("Floricane-fruiting (n = %d)", sum(hab == "FF")), sprintf("Primocane-fruiting (n = %d)", sum(hab == "PF"))), fill = c(COL_FF, COL_PF), border = NA, bty = "n", cex = 0.8)
+  }
+  hp_tr <- intersect(c("BB10_3yr", "BB10_2025_2026", "BB90_2025_2026"), tr_e)
+  if (length(hp_tr)) {
+    png_cairo(f_hi, 4.7 * length(hp_tr), 9); par(mfrow = c(2, length(hp_tr)), mar = c(5.6, 4.5, 3.2, 1))
+    for (tr in hp_tr) date_hist(d[[tr]], ifelse(d$PF == 1, "PF", "FF"), paste0("Low-chill panel: ", sub(" \\(day of year\\)", "", EARL_LABELS[[tr]])))
+    if ("PF" %in% names(em)) {
+      ea <- em[PF %in% c("PF", "FL")]
+      for (tr in hp_tr) date_hist(ea[[tr]], ifelse(ea$PF == "PF", "PF", "FF"), paste0("All field genotypes: ", sub(" \\(day of year\\)", "", EARL_LABELS[[tr]])))
+    }
+    dev.off()
+  }
+  cat("Stage 7 done. Files are in", ed, "\n")
+})
+
+# ############################################################
+# STAGE 8: BLUE VISUALISATIONS FOR THE THESIS
+#   Fig3  BLUEs by chill hours (box + points, PF vs FF)      Fig4  genotype reaction norms across chill hours
+#   Fig6  proportion that broke bud, PF vs FF
+#   Fig7  mean BLUE, genotypic spread and reliability by chill hours
+#   Fig8  BLUE by marker dosage at the lead SNP              Fig9  marker PCA (population structure) coloured by PF/FF and by BLUE
+#   Output: 05_Figures/. Each figure is skipped if it already exists (FORCE_RERUN <- TRUE to redraw).
+# ############################################################
+LEAD_MARKER <- "Ra01:725408_C/G"
+if (RUN_VIZ) local({
+  suppressPackageStartupMessages(library(data.table))
+  need <- function(f) REDRAW || !file.exists(f)
+  fig_dir <- file.path(root_dir, "05_Figures"); dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+  bl <- file.path(root_dir, "06_GWASpoly_Input/pheno_GWASpoly_LowChill_BLUEs.csv")
+  if (!file.exists(bl)) { cat("STAGE 8 skipped: BLUE file missing (run Stage 1).\n"); return(invisible()) }
+  ph <- fread(bl); setnames(ph, 1, "Genotype"); ph[, Habit := ifelse(Genotype %in% PF_GENOTYPES, "PF", "FF")]
+  hcol <- c(FF = COL_FF, PF = COL_PF)
+  EXPC <- intersect(c("BLUE_149", "BLUE_225", "BLUE_257", "BLUE_379"), names(ph)); hrs <- as.numeric(sub("BLUE_", "", EXPC))
+  if (length(EXPC) < 2) { cat("STAGE 8 skipped: fewer than two single-experiment BLUE columns.\n"); return(invisible()) }
+  ylab_b <- paste0(BLUE_NAME, " (% budbreak)")
+
+  # ---- Fig3: BLUEs by chill hours ----
+  f3 <- file.path(fig_dir, "Fig3_BLUE_by_chill_hours.png")
+  if (need(f3)) {
+    png_cairo(f3, 8, 5.5); par(mar = c(4.6, 4.8, 3, 1))
+    plot(NA, xlim = c(0.5, length(EXPC) + 0.5), ylim = range(unlist(ph[, EXPC, with = FALSE]), na.rm = TRUE), xaxt = "n", xlab = "Chilling hours", ylab = ylab_b, main = "Genotype BLUEs by chill hours", las = 1)
+    axis(1, at = seq_along(EXPC), labels = paste0(hrs, " h")); abline(h = 0, col = "grey80")
+    for (i in seq_along(EXPC)) for (h in c("FF", "PF")) {
+      v <- ph[[EXPC[i]]][ph$Habit == h]; v <- v[is.finite(v)]; if (length(v) < 3) next
+      xx <- i + ifelse(h == "FF", -0.2, 0.2)
+      boxplot(v, at = xx, add = TRUE, boxwex = 0.3, col = adjustcolor(hcol[[h]], 0.4), border = hcol[[h]], axes = FALSE, outline = FALSE)
+      set.seed(1); points(xx + runif(length(v), -0.07, 0.07), v, pch = 16, cex = 0.35, col = adjustcolor(hcol[[h]], 0.5))
+    }
+    legend("topleft", bty = "n", fill = adjustcolor(hcol, 0.5), border = hcol, legend = c("Floricane-fruiting", "Primocane-fruiting"))
+    dev.off(); cat("Wrote", f3, "\n")
+  }
+
+  # ---- Fig6: proportion of genotypes that broke bud ----
+  f6 <- file.path(fig_dir, "Fig6_Proportion_broke_bud.png")
+  BRK <- intersect(paste0("BREAK_", c(149, 225, 257, 379)), names(ph))
+  if (need(f6) && length(BRK)) {
+    tab <- sapply(c("FF", "PF"), function(h) sapply(BRK, function(b) mean(ph[[b]][ph$Habit == h], na.rm = TRUE)))
+    nn  <- sapply(c("FF", "PF"), function(h) sapply(BRK, function(b) sum(is.finite(ph[[b]][ph$Habit == h]))))
+    tab <- matrix(tab, nrow = length(BRK)); nn <- matrix(nn, nrow = length(BRK))
+    png_cairo(f6, 7, 5); par(mar = c(4.6, 4.8, 3, 1))
+    bp <- barplot(t(tab), beside = TRUE, names.arg = paste0(sub("BREAK_", "", BRK), " h"), col = c(COL_FF, COL_PF), ylim = c(0, 1.12), las = 1,
+                  xlab = "Chilling hours", ylab = "Proportion of genotypes that broke bud", main = "Genotypes with any budbreak, by chill hours")
+    text(bp, t(tab) + 0.035, labels = paste0("n=", t(nn)), cex = 0.7)
+    legend("topleft", bty = "n", fill = c(COL_FF, COL_PF), legend = c("Floricane-fruiting", "Primocane-fruiting"))
+    dev.off(); cat("Wrote", f6, "\n")
+  }
+
+  # ---- Fig7: mean BLUE, genotypic spread and reliability by chill hours ----
+  f7 <- file.path(fig_dir, "Fig7_Mean_spread_reliability_by_hours.png")
+  dgf <- file.path(root_dir, "03_Residual_Diagnostics/BLUE_distribution_and_residual_diagnostics.csv")
+  if (need(f7) && file.exists(dgf)) {
+    dg <- fread(dgf)
+    png_cairo(f7, 10, 4.8); par(mfrow = c(1, 2), mar = c(4.6, 4.8, 3, 1))
+    bp <- barplot(dg$BLUE_mean, names.arg = paste0(dg$Hours, " h"), col = "#56B4E9", las = 1, ylim = c(min(0, min(dg$BLUE_mean - dg$BLUE_SD)), max(dg$BLUE_mean + dg$BLUE_SD) * 1.12),
+                  xlab = "Chilling hours", ylab = "Mean BLUE (% budbreak)", main = "Mean and SD of genotype BLUEs")
+    arrows(bp, dg$BLUE_mean - dg$BLUE_SD, bp, dg$BLUE_mean + dg$BLUE_SD, angle = 90, code = 3, length = 0.05)
+    text(bp, max(dg$BLUE_mean + dg$BLUE_SD) * 1.08, labels = paste0("n=", dg$nGenotypes), cex = 0.75)
+    barplot(dg$ReliabilityApprox, names.arg = paste0(dg$Hours, " h"), col = "#E69F00", las = 1, ylim = c(0, 1), xlab = "Chilling hours", ylab = "Reliability (genotype-mean basis)", main = "Reliability of genotype BLUEs")
+    dev.off(); cat("Wrote", f7, "\n")
+  }
+
+  # ---- Fig8 + Fig9 need the marker matrix used in the GWAS ----
+  f8 <- file.path(fig_dir, "Fig8_BLUE_by_lead_SNP_dosage.png"); f9 <- file.path(fig_dir, "Fig9_Marker_PCA.png")
+  gf <- file.path(root_dir, "08_GWAS/00_Input/geno_GWASpoly_input.csv")
+  if ((need(f8) || need(f9)) && file.exists(gf)) {
+    gm <- fread(gf); smp <- intersect(ph$Genotype, names(gm))
+    if (need(f8)) {
+      row <- gm[Marker == LEAD_MARKER]
+      if (nrow(row) == 1) {
+        x <- as.numeric(unlist(row[, smp, with = FALSE])); names(x) <- smp; dose <- x[ph$Genotype]
+        png_cairo(f8, 10, 8); par(mfrow = c(2, 2), mar = c(5.2, 4.6, 3, 1))
+        for (tr in EXPC) {
+          y <- ph[[tr]]; ok <- is.finite(y) & is.finite(dose); dv <- factor(dose[ok], levels = 0:4)
+          boxplot(y[ok] ~ dv, col = adjustcolor("grey80", 0.6), border = "grey40", outline = FALSE, xaxt = "n", las = 1, xlab = sprintf("Dosage at %s", LEAD_MARKER), ylab = ylab_b, main = trait_label(tr), cex.main = 0.9)
+          axis(1, at = 1:5, labels = paste0(0:4, "\n(n=", tabulate(as.integer(dv), 5), ")"), tick = FALSE)
+          set.seed(1); points(as.integer(dv) + runif(sum(ok), -0.2, 0.2), y[ok], pch = 16, cex = 0.6, col = adjustcolor(unname(hcol[ph$Habit[ok]]), 0.7))
+          if (tr == EXPC[1]) legend("topleft", bty = "n", pch = 16, col = hcol, legend = c("Floricane-fruiting", "Primocane-fruiting"), cex = 0.8)
+        }
+        dev.off(); cat("Wrote", f8, "\n")
+      } else cat("Fig8 skipped: marker", LEAD_MARKER, "not found in the GWAS genotype file.\n")
+    }
+    if (need(f9)) {
+      X <- as.matrix(gm[, smp, with = FALSE]); storage.mode(X) <- "numeric"
+      rmn <- rowMeans(X, na.rm = TRUE); ix <- which(is.na(X), arr.ind = TRUE); if (nrow(ix)) X[ix] <- rmn[ix[, 1]]
+      X <- X[rowSums((X - rmn)^2) > 0, , drop = FALSE]
+      pr <- prcomp(t(X), center = TRUE, scale. = FALSE, rank. = 4); ve <- 100 * pr$sdev^2 / sum(pr$sdev^2)
+      hb <- ph$Habit[match(smp, ph$Genotype)]; b <- ph$BLUE_ALL4[match(smp, ph$Genotype)]
+      pal <- hcl.colors(100, "Viridis")
+      idx <- if ("BLUE_ALL4" %in% names(ph) && any(is.finite(b))) pmax(1, ceiling(100 * (b - min(b, na.rm = TRUE)) / diff(range(b, na.rm = TRUE)))) else rep(NA_real_, length(b))
+      colv <- ifelse(is.na(idx), "grey70", pal[ifelse(is.na(idx), 1, idx)])
+      png_cairo(f9, 11, 5.2); par(mfrow = c(1, 2), mar = c(4.6, 4.6, 3, 1))
+      plot(pr$x[, 1], pr$x[, 2], pch = 16, cex = 0.9, col = adjustcolor(unname(hcol[hb]), 0.7), xlab = sprintf("PC1 (%.1f%%)", ve[1]), ylab = sprintf("PC2 (%.1f%%)", ve[2]), main = sprintf("Marker PCA by fruiting habit (n = %d)", length(smp)), las = 1)
+      legend("topright", bty = "n", pch = 16, col = hcol, legend = c("Floricane-fruiting", "Primocane-fruiting"))
+      plot(pr$x[, 1], pr$x[, 2], pch = 16, cex = 0.9, col = adjustcolor(colv, 0.8), xlab = sprintf("PC1 (%.1f%%)", ve[1]), ylab = sprintf("PC2 (%.1f%%)", ve[2]), main = "Marker PCA coloured by BLUE, all four experiments", las = 1)
+      legend("topright", bty = "n", pch = 16, col = pal[c(1, 50, 100)], legend = c("lowest BLUE", "middle", "highest BLUE"))
+      dev.off()
+      fwrite(data.table(Genotype = smp, Habit = hb, BLUE_ALL4 = b, pr$x[, 1:4]), file.path(fig_dir, "Marker_PCA_scores.csv")); cat("Wrote", f9, "\n")
+    }
+  } else if (need(f8) || need(f9)) cat("Fig8/Fig9 skipped: GWAS genotype file not found (run Stage 2 first).\n")
+})
+
+# ############################################################
+# FINAL STAGE: THESIS-READY RESULTS PACKAGE (runs last so it sees every figure)
+# ############################################################
+if (RUN_THESIS) {
+  suppressPackageStartupMessages(library(openxlsx))
+  SEQ_COVERAGE_NOTE <- ""    # e.g. "Mean read depth was 150x per SNP (Capture-Seq) and 60x (Flex-Seq)."  Left empty = sentence omitted.
+  th_dir <- file.path(root_dir, "11_Thesis_Results"); dir.create(th_dir, recursive = TRUE, showWarnings = FALSE)
+  gw_dir <- file.path(root_dir, "08_GWAS"); sum_dir <- file.path(gw_dir, "09_Summary_Tables"); lz <- file.path(root_dir, "10_LocusZoom_and_Candidates")
+  f2 <- function(x, d = 2) ifelse(is.na(x), "NA", formatC(x, format = "f", digits = d))
+  rd <- function(p) if (file.exists(p)) fread(p) else data.table()
+
+  ph  <- fread(file.path(root_dir, "06_GWASpoly_Input/pheno_GWASpoly_LowChill_BLUEs.csv")); setnames(ph, 1, "Genotype")
+  dg  <- rd(file.path(root_dir, "03_Residual_Diagnostics/BLUE_distribution_and_residual_diagnostics.csv"))
+  lam <- rd(file.path(sum_dir, "Genomic_inflation_and_threshold_by_trait_model.csv"))
+  pks <- rd(file.path(sum_dir, "Peak_markers_all.csv")); sigm <- rd(file.path(sum_dir, "Significant_markers_all.csv"))
+  top <- rd(file.path(sum_dir, "Top_markers_per_trait_model.csv"))
+  loci <- rd(file.path(lz, "Loci_summary.csv")); cg <- rd(file.path(lz, "Candidate_genes.csv"))
+
+  ## ---- Table 1: phenotypes ----
+  T1a <- if (nrow(dg)) dg[, .(Experiment = Exp, `Chill (h)` = Hours, `n genotypes` = nGenotypes, `Mean BLUE (% budbreak)` = round(BLUE_mean, 1),
+          SD = round(BLUE_SD, 1), Min = round(BLUE_min, 1), Max = round(BLUE_max, 1),
+          `Heritability (H, genotype-mean basis)` = round(ReliabilityApprox, 2))] else data.table()
+  cont <- grep("^BLUE_", names(ph), value = TRUE)
+  T1b <- rbindlist(lapply(cont, function(tr) { y <- ph[[tr]]; data.table(Trait = tr, `n genotypes` = sum(is.finite(y)), Mean = round(mean(y, na.rm = TRUE), 1),
+          SD = round(sd(y, na.rm = TRUE), 1), Min = round(min(y, na.rm = TRUE), 1), Max = round(max(y, na.rm = TRUE), 1)) }))
+  brk <- grep("^BREAK_", names(ph), value = TRUE)
+  T1c <- rbindlist(lapply(brk, function(tr) { y <- ph[[tr]]; data.table(Trait = tr, `n genotypes` = sum(is.finite(y)),
+          `n that broke` = if (tr == "BREAK_PROP") NA_integer_ else sum(y == 1, na.rm = TRUE),
+          `Proportion` = round(mean(y, na.rm = TRUE), 2)) }))
+  ## Table 1a also gets one row per combined run (T1a itself stays single-experiment, because the Results text uses it)
+  comb_lab <- c(BLUE_EXP2_225_257 = "1.2 + 2.1 (combined)", BLUE_EXP3_225_257_379 = "1.2 + 2.1 + 2.2 (combined)", BLUE_ALL4 = "All four (combined)")
+  comb_hrs <- c(BLUE_EXP2_225_257 = "225 + 257", BLUE_EXP3_225_257_379 = "225 + 257 + 379", BLUE_ALL4 = "149 + 225 + 257 + 379")
+  T1a_comb <- rbindlist(lapply(intersect(names(comb_lab), names(ph)), function(tr) { y <- ph[[tr]]
+          data.table(Experiment = comb_lab[[tr]], `Chill (h)` = comb_hrs[[tr]], `n genotypes` = sum(is.finite(y)), `Mean BLUE (% budbreak)` = round(mean(y, na.rm = TRUE), 1),
+                     SD = round(sd(y, na.rm = TRUE), 1), Min = round(min(y, na.rm = TRUE), 1), Max = round(max(y, na.rm = TRUE), 1)) }), fill = TRUE)
+  T1a_full <- if (nrow(T1a)) rbind(copy(T1a)[, `:=`(Experiment = as.character(Experiment), `Chill (h)` = as.character(`Chill (h)`))], T1a_comb, fill = TRUE) else T1a_comb
+  ## extremes: the tail that is called "lowest" is listed from the very lowest upward (the old version listed it in the wrong order)
+  ext_traits <- intersect(c("BLUE_149", "BLUE_225", "BLUE_257", "BLUE_379", "BLUE_EXP2_225_257", "BLUE_ALL4"), names(ph))
+  T1d <- rbindlist(lapply(ext_traits, function(tr) { o <- ph[is.finite(get(tr))][order(-get(tr))]; k <- min(10, nrow(o))
+          rbind(data.table(Trait = tr, Tail = "Highest budbreak (lowest chill need)", o[1:k, .(Genotype, BLUE = round(get(tr), 1))]),
+                data.table(Trait = tr, Tail = "Lowest budbreak (highest chill need)", o[nrow(o):(nrow(o) - k + 1), .(Genotype, BLUE = round(get(tr), 1))])) }))
+  ## rank correlations among ALL BLUE traits (single and combined), recomputed here so the combined runs are included
+  bl <- grep("^BLUE_", names(ph), value = TRUE)
+  bm <- as.matrix(ph[, ..bl])
+  T1e  <- data.table(Trait = bl, round(cor(bm, use = "pairwise.complete.obs", method = "spearman"), 2))
+  T1e_n <- data.table(Trait = bl, crossprod(is.finite(bm) * 1))
+
+  ## ---- Table 2: panel and markers ----
+  geno <- fread(file.path(gw_dir, "00_Input/geno_GWASpoly_input.csv"))
+  Mx <- as.matrix(geno[, -(1:3), with = FALSE]); rownames(Mx) <- geno$Marker
+  p <- rowMeans(Mx, na.rm = TRUE) / 4; maf <- pmin(p, 1 - p)
+  maf_bins <- cut(maf, c(-Inf, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5), labels = c("<0.05", "0.05-0.10", "0.10-0.20", "0.20-0.30", "0.30-0.40", "0.40-0.50"))
+  T2a <- data.table(Item = c("Genotypes with marker data in GWAS", "Markers analysed (Ra01-Ra07)", "Markers with MAF >= 0.05", "Missing genotype cells (%)",
+                             "Genotypes with a phenotype and markers"),
+                    Value = c(ncol(Mx), nrow(Mx), sum(maf >= 0.05, na.rm = TRUE), round(100 * mean(is.na(Mx)), 2), sum(ph$Genotype %in% colnames(Mx))))
+  T2b <- geno[, .(`n markers` = .N), by = .(Chromosome = Chrom)][order(Chromosome)]
+  T2b[, `Length spanned (Mb)` := round(geno[, (max(Position) - min(Position)) / 1e6, by = Chrom][order(Chrom)]$V1, 1)]
+  T2c <- as.data.table(table(`MAF class` = maf_bins))
+  setnames(T2c, "N", "n markers")
+
+  ## ---- Table 3: significant peaks with effect size ----
+  code_marker <- function(x, model) switch(model, "additive" = x, "1-dom-alt" = as.numeric(x >= 1), "1-dom-ref" = as.numeric(x <= 3), x)
+  T3 <- data.table()
+  if (nrow(pks)) {
+    T3 <- pks[, {
+      x <- Mx[PeakMarker, ph$Genotype[ph$Genotype %in% colnames(Mx)]]; y <- ph[Genotype %in% colnames(Mx)][[Trait]]
+      z <- code_marker(x, Model); ok <- is.finite(z) & is.finite(y)
+      r2 <- if (sum(ok) > 5 && sd(z[ok]) > 0) summary(lm(y[ok] ~ z[ok]))$r.squared else NA_real_
+      b  <- if (sum(ok) > 5 && sd(z[ok]) > 0) coef(lm(y[ok] ~ z[ok]))[2] else NA_real_
+      list(Chrom = Chrom, Position = Position, Score = round(Score, 2), Threshold = round(Threshold, 2), nSigInPeak = nSigInPeak,
+           MAF = round(maf[PeakMarker], 3), `R2 (%)` = round(100 * r2, 1), `Effect per unit coding` = round(b, 2),
+           `n dosage 0/1/2/3/4` = paste(tabulate(x[ok] + 1, 5), collapse = "/"))
+    }, by = .(CovSet, Trait, Model, Peak, `Peak marker` = PeakMarker)]
+    T3 <- merge(T3, lam[, .(CovSet, Trait, Model, Lambda = round(Lambda, 2))], by = c("CovSet", "Trait", "Model"), all.x = TRUE)
+    ## genomic-control score: chi-square from the p-value, divided by lambda (never below 1), converted back to -log10(p)
+    gc_score <- function(s, lambda) { chi <- qchisq(-s * log(10), df = 1, lower.tail = FALSE, log.p = TRUE)
+                                      pchisq(chi / pmax(1, lambda), df = 1, lower.tail = FALSE, log.p = TRUE) / -log(10) }
+    T3[, `Score after GC` := round(gc_score(Score, Lambda), 2)][, `Above threshold after GC` := `Score after GC` > Threshold]
+    setorder(T3, -Score)
+  }
+  T3b <- if (nrow(top)) top[order(-Score), .SD[1], by = .(CovSet, Trait)][, .(Trait, Model, Marker, Chrom, Position, Score = round(Score, 2), Threshold = round(Threshold, 2), Significant = Score > Threshold)][order(-Score)] else data.table()
+  T4 <- if (nrow(lam)) lam[, .(Trait, Model, `n genotypes` = n, `Threshold (M.eff)` = round(Threshold, 2), `Max -log10(p)` = round(MaxScore, 2),
+                                `n significant markers` = nSignificant, Lambda = round(Lambda, 2))][order(Trait, Model)] else data.table()
+
+  ## ---- figure list with draft captions ----
+  figs <- list.files(root_dir, pattern = "\\.png$", recursive = TRUE)
+  cap <- function(pat, txt) { m <- grep(pat, figs, value = TRUE); if (length(m)) data.table(File = m, `Draft caption` = txt) else NULL }
+  FIG <- rbindlist(list(
+    cap("Fig1_", "Distribution and correlation of genotype BLUEs for % budbreak across the four forcing experiments (149, 225, 257 and 379 h chilling). Histograms on the diagonal, Pearson correlations above, scatterplots below."),
+    cap("Fig2_", "Histograms of genotype check-adjusted BLUEs (% budbreak) for each forcing experiment, with primocane-fruiting (PF) and floricane-fruiting (FF) genotypes in different colours."),
+    cap("Fig3_", "Genotype check-adjusted BLUEs (% budbreak) at each chilling duration, floricane- and primocane-fruiting genotypes shown separately. Boxes are quartiles; points are individual genotypes."),
+    cap("Fig6_", "Proportion of genotypes with any budbreak at each chilling duration, by fruiting habit (n above bars)."),
+    cap("Fig7_", "Mean and SD of genotype BLUEs, and reliability (genotype-mean basis), at each chilling duration."),
+    cap("Fig8_", "Genotype BLUEs by marker dosage (0-4) at the lead SNP Ra01:725,408 for each forcing experiment; points coloured by fruiting habit."),
+    cap("Fig9_", "Principal-component analysis of the marker data for the genotypes analysed, coloured by fruiting habit (left) and by the all-experiment BLUE (right)."),
+    cap("Manhattan_with_QQ", "Manhattan plot (left) with its quantile-quantile plot (right) for the trait and dosage model in the file name. Dashed line = M.eff genome-wide threshold (alpha = 0.05); lambda = genomic inflation factor. Kinship (LOCO) only."),
+    cap("Fig_Field_earliness", "Field budbreak date (calendar date, estimated over the recorded years) against the check-adjusted all-experiment BLUE (left) and by whether the genotype broke bud in any forcing experiment (right)."),
+    cap("Fig_Field_budbreak_date", "Distribution of field budbreak dates (3-day bins) for the low-chill panel (top) and all genotypes in the field trial (bottom); primocane-fruiting genotypes stacked on floricane-fruiting."),
+    cap("Density_Markers", "Marker density (A) and gene density (B) per 1 Mb bin along Ra01-Ra07."),
+    cap("LocusZoom", "Locus-zoom plot of the lead SNP (purple diamond) and +/- 500 kb: -log10(p) coloured by r2 with the lead SNP; gene models below, lead-SNP gene highlighted.")), fill = TRUE)
+
+  ## ---- write the workbook ----
+  wb <- createWorkbook(); hs <- createStyle(textDecoration = "bold", fgFill = "#305496", fontColour = "white", wrapText = TRUE)
+  add <- function(nm, x) { if (is.null(x) || !nrow(x)) return(invisible()); addWorksheet(wb, nm); writeData(wb, nm, x, headerStyle = hs); freezePane(wb, nm, firstRow = TRUE); setColWidths(wb, nm, 1:ncol(x), "auto") }
+  add("T1a_Pheno_by_experiment", T1a_full); add("T1b_Combined_BLUEs", T1b); add("T1c_Binary_traits", T1c); add("T1d_Genotype_extremes", T1d); add("T1e_Rank_correlations", T1e); add("T1e_n_pairs", T1e_n)
+  add("T2a_Panel_summary", T2a); add("T2b_Markers_by_chrom", T2b); add("T2c_MAF_distribution", T2c)
+  add("T3_Significant_peaks", T3); add("T3b_Best_marker_per_trait", T3b); add("T4_Thresholds_lambda", T4)
+  add("T5_Loci", loci); add("T6_Candidate_genes", cg)
+  add("T7_Field_vs_LowChill", rd(file.path(root_dir, "13_Field_Earliness_vs_LowChill/Field_earliness_vs_lowchill_correlations.csv")))
+  add("T7b_Field_by_binary", rd(file.path(root_dir, "13_Field_Earliness_vs_LowChill/Field_earliness_vs_binary_budbreak.csv")))
+  add("Figures_and_captions", FIG)
+  saveWorkbook(wb, file.path(th_dir, "Thesis_Tables.xlsx"), overwrite = TRUE)
+
+  ## ---- Results draft with numbers filled in ----
+  L <- character()
+  add_p <- function(...) L <<- c(L, paste0(...), "")
+  add_p("3.3 RESULTS (auto-filled draft; check every number against Thesis_Tables.xlsx before using)")
+  if (nrow(T1a)) {
+    mm <- T1a$`Mean BLUE (% budbreak)`; hh <- T1a$`Chill (h)`; nn <- T1a$`n genotypes`; jmp <- which.max(diff(mm))
+    trend <- if (all(diff(mm) > 0)) "increased with chilling" else
+      paste0("did not increase steadily with chilling; the largest increase was between ", hh[jmp], " and ", hh[jmp + 1], " h")
+    neg <- min(T1a$Min, na.rm = TRUE)
+    e2 <- T1b[Trait == "BLUE_EXP2_225_257"]
+    add_p("Phenotypic summary. Mean genotype BLUEs for percent budbreak ", trend, ": ", paste(sprintf("%s%% at %d h", f2(mm, 1), hh), collapse = ", "),
+          " (Table 1a). ", if (length(unique(nn)) > 1) paste0("The experiments did not contain the same sets of genotypes (n = ", paste(sprintf("%d at %d h", nn, hh), collapse = ", "),
+          "), so means are not strictly comparable across experiments. ") else "",
+          "Genotypic variation (SD of BLUEs) was ", paste(f2(T1a$SD, 1), collapse = ", "), " percentage points, with broad-sense heritabilities (genotype-mean basis) of ",
+          paste(f2(T1a$`Heritability (H, genotype-mean basis)`), collapse = ", "), " for the same experiments. ",
+          if (neg < 0) paste0("Some BLUEs were slightly below zero (minimum ", f2(neg, 1), "%) because BLUEs are model estimates; they were not truncated. ") else "",
+          if (nrow(e2)) paste0("The combined analysis of experiments 1.2 and 2.1 (225 + 257 h, close in chill units) included ", e2$`n genotypes`, " genotypes (mean ", f2(e2$Mean, 1), "%, SD ", f2(e2$SD, 1), "). ") else "",
+          "Rank correlations of genotype BLUEs between experiments and combined sets are in Table 1e. ",
+          "The genotypes with the highest mean budbreak across all experiments (BLUE_ALL4) were ", paste(T1d[Trait == "BLUE_ALL4" & grepl("^Highest", Tail)]$Genotype[1:5], collapse = ", "),
+          "; the lowest were ", paste(T1d[Trait == "BLUE_ALL4" & grepl("^Lowest", Tail)]$Genotype[1:5], collapse = ", "), " (Table 1d).")
+  }
+  if (nrow(T1c)) add_p("Binary budbreak. The proportion of genotypes that broke bud was ", paste(sprintf("%s at %s h", f2(T1c[Trait %in% paste0("BREAK_", c(149,225,257,379))]$Proportion), sub("BREAK_", "", T1c[Trait %in% paste0("BREAK_", c(149,225,257,379))]$Trait)), collapse = ", "), ".")
+  add_p("Genotyping and SNP summary. ", T2a$Value[1], " genotypes with marker data and ", T2a$Value[5], " with both phenotype and genotype were analysed using ",
+        format(T2a$Value[2], big.mark = ","), " tetraploid dosage markers on Ra01-Ra07 (", format(T2a$Value[3], big.mark = ","), " with MAF >= 0.05; ", T2a$Value[4], "% missing cells) (Table 2). ",
+        if (nzchar(SEQ_COVERAGE_NOTE)) SEQ_COVERAGE_NOTE else "")
+  if (!nzchar(SEQ_COVERAGE_NOTE)) cat("Reminder: set SEQ_COVERAGE_NOTE (top of Stage 4) to add mean coverage / total reads to the Results text.\n")
+  if (nrow(T3)) {
+    b <- T3[1]; nloc <- if (nrow(loci)) nrow(loci) else NA
+    add_p("GWAS. ", nrow(unique(T3[, .(Trait, Model, CovSet)])), " trait-by-model analyses had at least one marker above the M.eff threshold (",
+          paste(unique(f2(T4$`Threshold (M.eff)`)), collapse = " / "), " depending on model), consolidated into ", nloc, " locus/loci (Table 5). ",
+          "The strongest association was ", b$`Peak marker`, " (", b$Chrom, ":", format(b$Position, big.mark = ","), ") for ", b$Trait, " under the ", b$Model, " model, -log10(p) = ", f2(b$Score),
+          " (threshold ", f2(b$Threshold), "; ", b$nSigInPeak, " significant markers in the peak), explaining ", f2(b$`R2 (%)`, 1), "% of BLUE variance in a simple regression on the marker coding (MAF ", f2(b$MAF, 3), "). ",
+          "Genomic inflation was ", f2(min(T4$Lambda)), "-", f2(max(T4$Lambda)), " (median ", f2(median(T4$Lambda)), ") (Table 4; QQ plots).",
+          { hiL <- T4[Lambda > 1.5][order(-Lambda)]
+            if (nrow(hiL)) paste0(" Lambda exceeded 1.5 in ", nrow(hiL), " trait-by-model analyses (highest: ", paste(sprintf("%s %s, %.2f", head(hiL, 6)$Trait, head(hiL, 6)$Model, head(hiL, 6)$Lambda), collapse = "; "),
+                                  "). Values this high indicate inflated test statistics, consistent with the skewed, zero-inflated BLUE distributions and with relatedness not fully removed by the kinship matrix alone, so unadjusted p-values for these traits are anti-conservative. ",
+                                  "Table 3 therefore also reports the score after genomic control (chi-square divided by lambda). ",
+                                  "For the lead association the score after genomic control was ", f2(b$`Score after GC`), " against a threshold of ", f2(b$Threshold), ", ",
+                                  if (isTRUE(b$`Above threshold after GC`)) "so it remains significant." else "so it falls below the threshold.") else "" })
+    others <- T3[-1][!duplicated(paste(Chrom, round(Position / 1e6)))]
+    if (nrow(others)) add_p("Other loci: ", paste(sprintf("%s:%s Mb (%s, %s, -log10(p) = %s)", others$Chrom, f2(others$Position / 1e6, 2), others$Trait, others$Model, f2(others$Score)), collapse = "; "), ".")
+  } else add_p("GWAS. No marker crossed the M.eff threshold; see Table 3b for the best marker per trait.")
+  if (nrow(cg)) {
+    hit <- cg[Contains_lead == TRUE]
+    add_p("Candidate genes. ", if (nrow(hit)) paste0("The lead SNP of the strongest locus lies in ", hit$Gene[1], " (", hit$Chrom[1], ":", format(hit$Start[1], big.mark = ","), "-", format(hit$End[1], big.mark = ","), "; ",
+          ifelse(is.na(hit$Araport11_desc[1]), "no Araport11 match", hit$Araport11_desc[1]), "). ") else "",
+          { npl <- cg[, .N, by = Locus]; top_loc <- if (nrow(loci)) loci$LocusID[1] else npl$Locus[1]
+            paste0("Candidate windows contained a median of ", median(npl$N), " genes per locus (range ", min(npl$N), "-", max(npl$N), "; ", npl[Locus == top_loc]$N, " at the strongest locus, ", top_loc,
+                   ") (Table 6). Gene identity comes from homology-based annotation, so candidate status is positional only; linkage disequilibrium in this population is long, and the lead SNP gene is not necessarily causal.") })
+  }
+  fe_f <- file.path(root_dir, "13_Field_Earliness_vs_LowChill/Field_earliness_vs_lowchill_correlations.csv")
+  if (file.exists(fe_f)) { fe <- fread(fe_f)[Group == "All genotypes" & grepl("all four", LowChillTrait)]
+    if (nrow(fe)) add_p("Field earliness. Across ", fe$n[1], " genotypes, the check-adjusted all-experiment BLUE had a Spearman correlation of ", paste(sprintf("%s with %s (P = %s)", f2(fe$Spearman), sub(" \\(.*\\)$", "", fe$FieldTrait), signif(fe$Spearman_P, 2)), collapse = "; "), " (Table 7; a negative value means earlier field budbreak goes with more forced budbreak).") }
+  writeLines(L, file.path(th_dir, "Results_draft_text.txt"))
+
+  ## ---- README ----
+  writeLines(c("11_Thesis_Results", "Thesis_Tables.xlsx   Tables 1-6 as sheets + figure list with draft captions",
+               "Results_draft_text.txt   Results paragraphs with numbers filled in (edit before use)",
+               "Figures are in 05_Figures (phenotype), 08_GWAS/K_only/Manhattan_with_QQ, 10_LocusZoom_and_Candidates/LocusZoom, 12_Marker_Density_Maps and 13_Field_Earliness_vs_LowChill"),
+             file.path(th_dir, "README.txt"))
+  cat("Thesis package written to", th_dir, "\n")
+}
+
+
+# remember which plot style is on disk, so existing plots are skipped next time
+writeLines(PLOT_STYLE, style_file)
